@@ -31,7 +31,7 @@ import {
 import { Crown, CalendarClock, Package } from 'lucide-react';
 import { SiStripe } from 'react-icons/si';
 import { IconCreditCard } from '@douyinfe/semi-icons';
-import { renderQuota } from '../../../helpers';
+import { renderQuota, getQuotaPerUnit } from '../../../helpers';
 import { getCurrencyConfig } from '../../../helpers/render';
 import {
   formatSubscriptionDuration,
@@ -56,6 +56,8 @@ const SubscriptionPurchaseModal = ({
   onPayStripe,
   onPayCreem,
   onPayEpay,
+  onPayWallet,
+  walletQuota = 0,
 }) => {
   const plan = selectedPlan?.plan;
   const totalAmount = Number(plan?.total_amount || 0);
@@ -65,15 +67,21 @@ const SubscriptionPurchaseModal = ({
   const displayPrice = convertedPrice.toFixed(
     Number.isInteger(convertedPrice) ? 0 : 2,
   );
+  const displayQuotaCost = Math.max(
+    0,
+    Math.round(Number(price || 0) * Number(getQuotaPerUnit() || 0)),
+  );
   // 只有当管理员开启支付网关 AND 套餐配置了对应的支付ID时才显示
   const hasStripe = enableStripeTopUp && !!plan?.stripe_price_id;
   const hasCreem = enableCreemTopUp && !!plan?.creem_product_id;
   const hasEpay = enableOnlineTopUp && epayMethods.length > 0;
-  const hasAnyPayment = hasStripe || hasCreem || hasEpay;
+  const hasWallet = walletQuota >= 0;
+  const hasAnyPayment = hasStripe || hasCreem || hasEpay || hasWallet;
   const purchaseLimit = Number(purchaseLimitInfo?.limit || 0);
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
   const purchaseLimitReached =
     purchaseLimit > 0 && purchaseCount >= purchaseLimit;
+  const walletInsufficient = walletQuota < displayQuotaCost;
 
   return (
     <Modal
@@ -184,6 +192,31 @@ const SubscriptionPurchaseModal = ({
               <Text size='small' type='tertiary'>
                 {t('选择支付方式')}：
               </Text>
+
+              {/* 钱包余额 */}
+              {hasWallet && (
+                <div className='flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white/60 px-3 py-2 dark:border-gray-700 dark:bg-slate-900/40'>
+                  <div className='flex flex-col gap-1'>
+                    <Text strong>{t('余额支付')}</Text>
+                    <Text size='small' type='tertiary'>
+                      {t('当前余额')}：{renderQuota(walletQuota)} · {t('需扣')}：
+                      {renderQuota(displayQuotaCost)}
+                      {walletInsufficient
+                        ? `（${t('差额')} ${renderQuota(displayQuotaCost - walletQuota)}）`
+                        : ''}
+                    </Text>
+                  </div>
+                  <Button
+                    theme='solid'
+                    type='primary'
+                    onClick={onPayWallet}
+                    loading={paying}
+                    disabled={purchaseLimitReached || walletInsufficient}
+                  >
+                    {walletInsufficient ? t('余额不足') : t('使用余额')}
+                  </Button>
+                </div>
+              )}
 
               {/* Stripe / Creem */}
               {(hasStripe || hasCreem) && (

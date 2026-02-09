@@ -82,6 +82,7 @@ const SubscriptionPlansCard = ({
   activeSubscriptions = [],
   allSubscriptions = [],
   reloadSubscriptionSelf,
+  userState,
   withCard = true,
 }) => {
   const [open, setOpen] = useState(false);
@@ -91,6 +92,7 @@ const SubscriptionPlansCard = ({
   const [refreshing, setRefreshing] = useState(false);
 
   const epayMethods = useMemo(() => getEpayMethods(payMethods), [payMethods]);
+  const walletQuota = Number(userState?.user?.quota || 0);
 
   const openBuy = (p) => {
     setSelectedPlan(p);
@@ -184,6 +186,34 @@ const SubscriptionPlansCard = ({
         submitEpayForm({ url: res.data.url, params: res.data.data });
         showSuccess(t('已发起支付'));
         closeBuy();
+      } else {
+        const errorMsg =
+          typeof res.data?.data === 'string'
+            ? res.data.data
+            : res.data?.message || t('支付失败');
+        showError(errorMsg);
+      }
+    } catch (e) {
+      showError(t('支付请求失败'));
+    } finally {
+      setPaying(false);
+    }
+  };
+
+  const payWallet = async () => {
+    if (!selectedPlan?.plan?.id) {
+      showError(t('请选择套餐'));
+      return;
+    }
+    setPaying(true);
+    try {
+      const res = await API.post('/api/subscription/wallet/pay', {
+        plan_id: selectedPlan.plan.id,
+      });
+      if (res.data?.message === 'success') {
+        showSuccess(t('购买成功'));
+        closeBuy();
+        await reloadSubscriptionSelf?.();
       } else {
         const errorMsg =
           typeof res.data?.data === 'string'
@@ -676,6 +706,8 @@ const SubscriptionPlansCard = ({
         onPayStripe={payStripe}
         onPayCreem={payCreem}
         onPayEpay={payEpay}
+        onPayWallet={payWallet}
+        walletQuota={walletQuota}
       />
     </>
   );

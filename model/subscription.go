@@ -571,6 +571,103 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 	return nil
 }
 
+// CompleteWalletSubscriptionOrder creates and completes a subscription order paid by wallet balance.
+func CompleteWalletSubscriptionOrder(tradeNo string, userId int, plan *SubscriptionPlan, paymentMethod string, quotaCost int, providerPayload string) error {
+	if strings.TrimSpace(tradeNo) == "" {
+		return errors.New("tradeNo is empty")
+	}
+	if userId <= 0 {
+		return errors.New("invalid userId")
+	}
+	if plan == nil || plan.Id <= 0 {
+		return errors.New("invalid plan")
+	}
+	if quotaCost < 0 {
+		return errors.New("invalid quota cost")
+	}
+	if strings.TrimSpace(paymentMethod) == "" {
+		paymentMethod = "wallet"
+	}
+
+	var logUserId int
+	var logPlanTitle string
+	var logMoney float64
+	var logPaymentMethod string
+	var upgradeGroup string
+	var shouldSyncQuota bool
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var user User
+		if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("id = ?", userId).First(&user).Error; err != nil {
+			return err
+		}
+		if quotaCost > 0 && user.Quota < quotaCost {
+			return errors.New("余额不足")
+		}
+
+		order := &SubscriptionOrder{
+			UserId:        userId,
+			PlanId:        plan.Id,
+			Money:         plan.PriceAmount,
+			TradeNo:       tradeNo,
+			PaymentMethod: paymentMethod,
+			CreateTime:    common.GetTimestamp(),
+			Status:        common.TopUpStatusPending,
+		}
+		if err := tx.Create(order).Error; err != nil {
+			return err
+		}
+
+		if quotaCost > 0 {
+			if err := tx.Model(&User{}).Where("id = ?", userId).
+				Update("quota", gorm.Expr("quota - ?", quotaCost)).Error; err != nil {
+				return err
+			}
+			shouldSyncQuota = true
+		}
+
+		upgradeGroup = strings.TrimSpace(plan.UpgradeGroup)
+		if _, err := CreateUserSubscriptionFromPlanTx(tx, userId, plan, "order"); err != nil {
+			return err
+		}
+		if err := upsertSubscriptionTopUpTx(tx, order); err != nil {
+			return err
+		}
+
+		order.Status = common.TopUpStatusSuccess
+		order.CompleteTime = common.GetTimestamp()
+		if providerPayload != "" {
+			order.ProviderPayload = providerPayload
+		}
+		if err := tx.Save(order).Error; err != nil {
+			return err
+		}
+
+		logUserId = userId
+		logPlanTitle = plan.Title
+		logMoney = order.Money
+		logPaymentMethod = order.PaymentMethod
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	if upgradeGroup != "" && logUserId > 0 {
+		_ = UpdateUserGroupCache(logUserId, upgradeGroup)
+	}
+	if shouldSyncQuota && logUserId > 0 {
+		go func() {
+			_ = cacheDecrUserQuota(logUserId, int64(quotaCost))
+		}()
+	}
+	if logUserId > 0 {
+		msg := fmt.Sprintf("订阅购买成功，套餐: %s，支付金额: %.2f，支付方式: %s", logPlanTitle, logMoney, logPaymentMethod)
+		RecordLog(logUserId, LogTypeTopup, msg)
+	}
+	return nil
+}
+
 func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	if tx == nil || order == nil {
 		return errors.New("invalid subscription order")
