@@ -48,5 +48,19 @@ jobs:
 
       - name: Build Backend
         run: |
+          mkdir -p dist
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            OUTPUT="dist/new-api-${VERSION}-windows.exe"
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            OUTPUT="dist/new-api-${VERSION}-macos"
+          else
+            OUTPUT="dist/new-api-${VERSION}-linux"
+          fi
           go mod download
-          go build -v ./...
+          go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION'" -o "$OUTPUT"
+
+      - name: Upload Backend Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-${{ matrix.os }}
+          path: dist/*
