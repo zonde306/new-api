@@ -17,7 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useContext, useEffect, useCallback, useRef } from 'react';
+import React, {
+  useContext,
+  useEffect,
+  useCallback,
+  useRef,
+  useState,
+} from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Layout, Toast, Modal } from '@douyinfe/semi-ui';
@@ -83,6 +89,8 @@ const Playground = () => {
   const isMobile = useIsMobile();
   const styleState = { isMobile };
   const [searchParams] = useSearchParams();
+
+  const [imageAttachments, setImageAttachments] = useState([]);
 
   const state = usePlaygroundState();
   const {
@@ -209,19 +217,20 @@ const Playground = () => {
         // 处理最后一个用户消息的图片
         for (let i = messages.length - 1; i >= 0; i--) {
           if (messages[i].role === MESSAGE_ROLES.USER) {
-            if (inputs.imageEnabled && inputs.imageUrls) {
-              const validImageUrls = inputs.imageUrls.filter(
-                (url) => url.trim() !== '',
+            const persistedUrls = inputs.imageUrls || [];
+            const combinedImageUrls = [
+              ...persistedUrls,
+              ...imageAttachments,
+            ].filter((url) => url && url.trim() !== '');
+
+            if (inputs.imageEnabled && combinedImageUrls.length > 0) {
+              const textContent = getTextContent(messages[i]) || '示例消息';
+              const content = buildMessageContent(
+                textContent,
+                combinedImageUrls,
+                true,
               );
-              if (validImageUrls.length > 0) {
-                const textContent = getTextContent(messages[i]) || '示例消息';
-                const content = buildMessageContent(
-                  textContent,
-                  validImageUrls,
-                  true,
-                );
-                messages[i] = { ...messages[i], content };
-              }
+              messages[i] = { ...messages[i], content };
             }
             break;
           }
@@ -233,7 +242,14 @@ const Playground = () => {
       console.error('构造预览请求体失败:', error);
       return null;
     }
-  }, [inputs, parameterEnabled, message, customRequestMode, customRequestBody]);
+  }, [
+    inputs,
+    parameterEnabled,
+    message,
+    customRequestMode,
+    customRequestBody,
+    imageAttachments,
+  ]);
 
   // 发送消息
   function onMessageSend(content, attachment) {
@@ -248,18 +264,22 @@ const Playground = () => {
       try {
         const customPayload = JSON.parse(customRequestBody);
 
-        setMessage((prevMessage) => {
-          const newMessages = [...prevMessage, userMessage, loadingMessage];
+    setMessage((prevMessage) => {
+      const newMessages = [...prevMessage, userMessage, loadingMessage];
 
-          // 发送自定义请求体
-          sendRequest(customPayload, customPayload.stream !== false);
+      // 发送自定义请求体
+      sendRequest(customPayload, customPayload.stream !== false);
 
-          // 发送消息后保存，传入新消息列表
-          setTimeout(() => saveMessagesImmediately(newMessages), 0);
+      // 发送消息后保存，传入新消息列表
+      setTimeout(() => saveMessagesImmediately(newMessages), 0);
 
-          return newMessages;
-        });
-        return;
+      return newMessages;
+    });
+
+    if (imageAttachments.length > 0) {
+      setImageAttachments([]);
+    }
+    return;
       } catch (error) {
         console.error('自定义请求体JSON解析失败:', error);
         Toast.error(ERROR_MESSAGES.JSON_PARSE_ERROR);
@@ -268,10 +288,13 @@ const Playground = () => {
     }
 
     // 默认模式
-    const validImageUrls = inputs.imageUrls.filter((url) => url.trim() !== '');
+    const persistedUrls = inputs.imageUrls || [];
+    const combinedImageUrls = [...persistedUrls, ...imageAttachments].filter(
+      (url) => url && url.trim() !== '',
+    );
     const messageContent = buildMessageContent(
       content,
-      validImageUrls,
+      combinedImageUrls,
       inputs.imageEnabled,
     );
     const userMessageWithImages = createMessage(
@@ -303,6 +326,10 @@ const Playground = () => {
 
       return messagesWithLoading;
     });
+
+    if (combinedImageUrls.length > 0) {
+      setImageAttachments([]);
+    }
   }
 
   // 切换推理展开状态
@@ -440,21 +467,33 @@ const Playground = () => {
   // 处理粘贴图片
   const handlePasteImage = useCallback(
     (base64Data) => {
-      if (!inputs.imageEnabled) {
+      if (!inputs.imageEnabled || !base64Data) {
         return;
       }
-      // 添加图片到 imageUrls 数组
-      const newUrls = [...(inputs.imageUrls || []), base64Data];
-      handleInputChange('imageUrls', newUrls);
+      setImageAttachments((prev) => [...prev, base64Data]);
     },
-    [inputs.imageEnabled, inputs.imageUrls, handleInputChange],
+    [inputs.imageEnabled],
   );
+
+  const handleRemoveImage = useCallback((indexToRemove) => {
+    setImageAttachments((prev) =>
+      prev.filter((_, index) => index !== indexToRemove),
+    );
+  }, []);
+
+  const handleClearImages = useCallback(() => {
+    setImageAttachments([]);
+  }, []);
 
   // Playground Context 值
   const playgroundContextValue = {
     onPasteImage: handlePasteImage,
+    onRemoveImage: handleRemoveImage,
+    onClearImages: handleClearImages,
     imageUrls: inputs.imageUrls || [],
+    imageAttachments,
     imageEnabled: inputs.imageEnabled || false,
+    customRequestMode,
   };
 
   return (
