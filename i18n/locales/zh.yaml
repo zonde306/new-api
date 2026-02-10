@@ -235,6 +235,9 @@ oauth.connect_failed: "无法连接至 {{.Provider}} 服务器，请稍后重试
 oauth.token_failed: "{{.Provider}} 获取 Token 失败，请检查设置"
 oauth.user_info_empty: "{{.Provider}} 获取用户信息为空，请检查设置"
 oauth.trust_level_low: "Linux DO 信任等级未达到管理员设置的最低信任等级"
+oauth.discord_guild_config_invalid: "Discord 服务器准入配置无效"
+oauth.discord_guild_required: "请加入指定的 Discord 服务器后再继续"
+oauth.discord_guild_check_failed: "Discord 服务器成员校验失败"
 
 # Model layer error messages
 redeem.failed: "兑换失败，请稍后重试"

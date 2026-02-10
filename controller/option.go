@@ -84,6 +84,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "discord.guilds":
+		if _, err = system_setting.ParseDiscordGuildRule(option.Value.(string)); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "Discord 服务器准入配置格式错误，请填写合法的 JSON",
+			})
+			return
+		}
 	case "oidc.enabled":
 		if option.Value == "true" && system_setting.GetOIDCSettings().ClientId == "" {
 			c.JSON(http.StatusOK, gin.H{

@@ -56,6 +56,7 @@ const SystemSetting = () => {
     'discord.enabled': '',
     'discord.client_id': '',
     'discord.client_secret': '',
+    'discord.guilds': '',
     'oidc.enabled': '',
     'oidc.client_id': '',
     'oidc.client_secret': '',
@@ -495,6 +496,12 @@ const SystemSetting = () => {
       options.push({
         key: 'discord.client_secret',
         value: inputs['discord.client_secret'],
+      });
+    }
+    if (originInputs['discord.guilds'] !== inputs['discord.guilds']) {
+      options.push({
+        key: 'discord.guilds',
+        value: inputs['discord.guilds'] || '',
       });
     }
 
@@ -1472,6 +1479,24 @@ const SystemSetting = () => {
                         label={t('Discord Client Secret')}
                         type='password'
                         placeholder={t('敏感信息不会发送到前端显示')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                    style={{ marginTop: 16 }}
+                  >
+                    <Col xs={24} sm={24} md={24} lg={24} xl={24}>
+                      <Form.TextArea
+                        field="['discord.guilds']"
+                        label={t('Discord 服务器准入配置')}
+                        placeholder={t(
+                          '支持 JSON 配置 AND/OR 条件，留空表示不限制。示例：{"and":["guild_id_1"],"or":["guild_id_2","guild_id_3"]}',
+                        )}
+                        autosize
+                        extraText={t(
+                          'and: 必须同时加入全部服务器；or: 加入任一服务器即可。两个字段可同时使用。',
+                        )}
                       />
                     </Col>
                   </Row>

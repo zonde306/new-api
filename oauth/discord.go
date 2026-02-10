@@ -2,13 +2,13 @@ package oauth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -36,6 +36,10 @@ type discordUser struct {
 	UID  string `json:"id"`
 	ID   string `json:"username"`
 	Name string `json:"global_name"`
+}
+
+type discordGuild struct {
+	ID string `json:"id"`
 }
 
 func (p *DiscordProvider) GetName() string {
@@ -84,7 +88,7 @@ func (p *DiscordProvider) ExchangeToken(ctx context.Context, code string, c *gin
 	logger.LogDebug(ctx, "[OAuth-Discord] ExchangeToken response status: %d", res.StatusCode)
 
 	var discordResponse discordOAuthResponse
-	err = json.NewDecoder(res.Body).Decode(&discordResponse)
+	err = common.DecodeJson(res.Body, &discordResponse)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] ExchangeToken decode error: %s", err.Error()))
 		return nil, err
@@ -134,7 +138,7 @@ func (p *DiscordProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*
 	}
 
 	var discordUser discordUser
-	err = json.NewDecoder(res.Body).Decode(&discordUser)
+	err = common.DecodeJson(res.Body, &discordUser)
 	if err != nil {
 		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo decode error: %s", err.Error()))
 		return nil, err
@@ -145,6 +149,17 @@ func (p *DiscordProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*
 		return nil, NewOAuthError(i18n.MsgOAuthUserInfoEmpty, map[string]any{"Provider": "Discord"})
 	}
 
+	rule, err := system_setting.ParseDiscordGuildRule(system_setting.GetDiscordSettings().Guilds)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetUserInfo guild rule parse error: %s", err.Error()))
+		return nil, NewOAuthError(i18n.MsgOAuthDiscordGuildConfigInvalid, nil)
+	}
+	if !rule.IsEmpty() {
+		if err := verifyDiscordGuildMembership(ctx, &client, token.AccessToken, rule); err != nil {
+			return nil, err
+		}
+	}
+
 	logger.LogDebug(ctx, "[OAuth-Discord] GetUserInfo success: uid=%s, username=%s, name=%s", discordUser.UID, discordUser.ID, discordUser.Name)
 
 	return &OAuthUser{
@@ -152,6 +167,67 @@ func (p *DiscordProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*
 		Username:       discordUser.ID,
 		DisplayName:    discordUser.Name,
 	}, nil
+}
+
+func verifyDiscordGuildMembership(ctx context.Context, client *http.Client, accessToken string, rule *system_setting.DiscordGuildRule) error {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://discord.com/api/v10/users/@me/guilds", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	res, err := client.Do(req)
+	if err != nil {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetGuilds error: %s", err.Error()))
+		return NewOAuthErrorWithRaw(i18n.MsgOAuthDiscordGuildCheckFailed, nil, err.Error())
+	}
+	defer res.Body.Close()
+
+	logger.LogDebug(ctx, "[OAuth-Discord] GetGuilds response status: %d", res.StatusCode)
+
+	if res.StatusCode != http.StatusOK {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetGuilds failed: status=%d", res.StatusCode))
+		return NewOAuthError(i18n.MsgOAuthDiscordGuildCheckFailed, nil)
+	}
+
+	var guilds []discordGuild
+	if err := common.DecodeJson(res.Body, &guilds); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] GetGuilds decode error: %s", err.Error()))
+		return err
+	}
+
+	guildSet := make(map[string]struct{}, len(guilds))
+	for _, guild := range guilds {
+		if guild.ID != "" {
+			guildSet[guild.ID] = struct{}{}
+		}
+	}
+
+	if len(rule.And) > 0 {
+		for _, guildID := range rule.And {
+			if _, ok := guildSet[guildID]; !ok {
+				logger.LogDebug(ctx, "[OAuth-Discord] Guild requirement (AND) failed: %s", guildID)
+				return NewOAuthError(i18n.MsgOAuthDiscordGuildRequired, nil)
+			}
+		}
+	}
+
+	if len(rule.Or) > 0 {
+		matched := false
+		for _, guildID := range rule.Or {
+			if _, ok := guildSet[guildID]; ok {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			logger.LogDebug(ctx, "[OAuth-Discord] Guild requirement (OR) failed")
+			return NewOAuthError(i18n.MsgOAuthDiscordGuildRequired, nil)
+		}
+	}
+
+	return nil
 }
 
 func (p *DiscordProvider) IsUserIDTaken(providerUserID string) bool {

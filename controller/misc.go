@@ -55,6 +55,7 @@ func GetStatus(c *gin.Context) {
 		"github_client_id":            common.GitHubClientId,
 		"discord_oauth":               system_setting.GetDiscordSettings().Enabled,
 		"discord_client_id":           system_setting.GetDiscordSettings().ClientId,
+		"discord_guilds":              system_setting.GetDiscordSettings().Guilds,
 		"linuxdo_oauth":               common.LinuxDOOAuthEnabled,
 		"linuxdo_client_id":           common.LinuxDOClientId,
 		"linuxdo_minimum_trust_level": common.LinuxDOMinimumTrustLevel,

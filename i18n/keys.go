@@ -274,10 +274,13 @@ const (
 	MsgOAuthUserBanned           = "oauth.user_banned"
 	MsgOAuthBindSuccess          = "oauth.bind_success"
 	MsgOAuthAlreadyBound         = "oauth.already_bound"
-	MsgOAuthConnectFailed        = "oauth.connect_failed"
-	MsgOAuthTokenFailed          = "oauth.token_failed"
-	MsgOAuthUserInfoEmpty        = "oauth.user_info_empty"
-	MsgOAuthTrustLevelLow        = "oauth.trust_level_low"
+	MsgOAuthConnectFailed             = "oauth.connect_failed"
+	MsgOAuthTokenFailed               = "oauth.token_failed"
+	MsgOAuthUserInfoEmpty             = "oauth.user_info_empty"
+	MsgOAuthTrustLevelLow             = "oauth.trust_level_low"
+	MsgOAuthDiscordGuildConfigInvalid = "oauth.discord_guild_config_invalid"
+	MsgOAuthDiscordGuildRequired      = "oauth.discord_guild_required"
+	MsgOAuthDiscordGuildCheckFailed   = "oauth.discord_guild_check_failed"
 )
 
 // Model layer error messages (for translation in controller)
