@@ -2,7 +2,8 @@ name: CI Build (Multi-Platform)
 
 on:
   push:
-  pull_request:
+    branches:
+      - stable
 
 jobs:
   build:

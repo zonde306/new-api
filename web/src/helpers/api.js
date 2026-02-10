@@ -248,7 +248,7 @@ export async function onDiscordOAuthClicked(client_id, options = {}) {
   if (!state) return;
   const redirect_uri = `${window.location.origin}/oauth/discord`;
   const response_type = 'code';
-  const scope = 'identify+openid+guilds';
+  const scope = 'identify+openid+email+guilds';
   window.open(
     `https://discord.com/oauth2/authorize?client_id=${client_id}&redirect_uri=${redirect_uri}&response_type=${response_type}&scope=${scope}&state=${state}`,
   );

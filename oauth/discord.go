@@ -33,9 +33,10 @@ type discordOAuthResponse struct {
 }
 
 type discordUser struct {
-	UID  string `json:"id"`
-	ID   string `json:"username"`
-	Name string `json:"global_name"`
+	UID   string `json:"id"`
+	ID    string `json:"username"`
+	Name  string `json:"global_name"`
+	Email string `json:"email"`
 }
 
 type discordGuild struct {
@@ -160,12 +161,13 @@ func (p *DiscordProvider) GetUserInfo(ctx context.Context, token *OAuthToken) (*
 		}
 	}
 
-	logger.LogDebug(ctx, "[OAuth-Discord] GetUserInfo success: uid=%s, username=%s, name=%s", discordUser.UID, discordUser.ID, discordUser.Name)
+	logger.LogDebug(ctx, "[OAuth-Discord] GetUserInfo success: uid=%s, username=%s, name=%s, email=%s", discordUser.UID, discordUser.ID, discordUser.Name, discordUser.Email)
 
 	return &OAuthUser{
 		ProviderUserID: discordUser.UID,
 		Username:       discordUser.ID,
 		DisplayName:    discordUser.Name,
+		Email:          discordUser.Email,
 	}, nil
 }
 
