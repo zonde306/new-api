@@ -305,6 +305,7 @@ const MessageContent = ({
                         }
                         animated={false}
                         previousContentLength={0}
+                        allowHtml
                       />
                     </div>
                   )}
@@ -343,6 +344,7 @@ const MessageContent = ({
                       className=''
                       animated={isThinkingStatus}
                       previousContentLength={prevLength}
+                      allowHtml
                     />
                   </div>
                 );
@@ -357,6 +359,7 @@ const MessageContent = ({
                     className={message.role === 'user' ? 'user-message' : ''}
                     animated={false}
                     previousContentLength={0}
+                    allowHtml
                   />
                 </div>
               );

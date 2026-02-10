@@ -167,6 +167,7 @@ const ThinkingContent = ({
                   className=''
                   animated={isThinkingStatus}
                   previousContentLength={prevLength}
+                  allowHtml
                 />
               </div>
             </div>

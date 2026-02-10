@@ -26,6 +26,7 @@ import RemarkBreaks from 'remark-breaks';
 import RehypeKatex from 'rehype-katex';
 import RemarkGfm from 'remark-gfm';
 import RehypeHighlight from 'rehype-highlight';
+import RehypeRaw from 'rehype-raw';
 import { useRef, useState, useEffect, useMemo } from 'react';
 import mermaid from 'mermaid';
 import React from 'react';
@@ -384,6 +385,7 @@ function _MarkdownContent(props) {
     className,
     animated = false,
     previousContentLength = 0,
+    allowHtml = false,
   } = props;
 
   const escapedContent = useMemo(() => {
@@ -394,7 +396,11 @@ function _MarkdownContent(props) {
   const isUserMessage = className && className.includes('user-message');
 
   const rehypePluginsBase = useMemo(() => {
-    const base = [
+    const base = [];
+    if (allowHtml) {
+      base.push(RehypeRaw);
+    }
+    base.push(
       RehypeKatex,
       [
         RehypeHighlight,
@@ -403,17 +409,18 @@ function _MarkdownContent(props) {
           ignoreMissing: true,
         },
       ],
-    ];
+    );
     if (animated) {
       base.push([rehypeSplitWordsIntoSpans, { previousContentLength }]);
     }
     return base;
-  }, [animated, previousContentLength]);
+  }, [allowHtml, animated, previousContentLength]);
 
   return (
     <ReactMarkdown
       remarkPlugins={[RemarkMath, RemarkGfm, RemarkBreaks]}
       rehypePlugins={rehypePluginsBase}
+      skipHtml={!allowHtml}
       components={{
         pre: PreCode,
         code: CustomCode,
@@ -644,6 +651,7 @@ export function MarkdownRenderer(props) {
     style,
     animated = false,
     previousContentLength = 0,
+    allowHtml = false,
     ...otherProps
   } = props;
 
@@ -688,6 +696,7 @@ export function MarkdownRenderer(props) {
           className={className}
           animated={animated}
           previousContentLength={previousContentLength}
+          allowHtml={allowHtml}
         />
       )}
     </div>
