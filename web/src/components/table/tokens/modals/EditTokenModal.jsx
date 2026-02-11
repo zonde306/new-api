@@ -72,6 +72,10 @@ const EditTokenModal = (props) => {
     model_limits_enabled: false,
     model_limits: [],
     allow_ips: '',
+    rate_limit_enabled: false,
+    rate_limit_duration_minutes: 1,
+    rate_limit_count: 0,
+    rate_limit_success_count: 1000,
     group: '',
     cross_group_retry: false,
     tokenCount: 1,
@@ -221,13 +225,20 @@ const EditTokenModal = (props) => {
       }
       localInputs.model_limits = localInputs.model_limits.join(',');
       localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+      localInputs.rate_limit_enabled = !!localInputs.rate_limit_enabled;
+      localInputs.rate_limit_duration_minutes =
+        parseInt(localInputs.rate_limit_duration_minutes, 10) || 1;
+      localInputs.rate_limit_count =
+        parseInt(localInputs.rate_limit_count, 10) || 0;
+      localInputs.rate_limit_success_count =
+        parseInt(localInputs.rate_limit_success_count, 10) || 0;
       let res = await API.put(`/api/token/`, {
         ...localInputs,
         id: parseInt(props.editingToken.id),
       });
       const { success, message } = res.data;
       if (success) {
-        showSuccess(t('令牌更新成功！'));
+showSuccess(t('令牌更新成功！'));
         props.refresh();
         props.handleClose();
       } else {
@@ -258,6 +269,13 @@ const EditTokenModal = (props) => {
         }
         localInputs.model_limits = localInputs.model_limits.join(',');
         localInputs.model_limits_enabled = localInputs.model_limits.length > 0;
+        localInputs.rate_limit_enabled = !!localInputs.rate_limit_enabled;
+        localInputs.rate_limit_duration_minutes =
+          parseInt(localInputs.rate_limit_duration_minutes, 10) || 1;
+        localInputs.rate_limit_count =
+          parseInt(localInputs.rate_limit_count, 10) || 0;
+        localInputs.rate_limit_success_count =
+          parseInt(localInputs.rate_limit_success_count, 10) || 0;
         let res = await API.post(`/api/token/`, localInputs);
         const { success, message } = res.data;
         if (success) {
@@ -571,6 +589,95 @@ const EditTokenModal = (props) => {
                       )}
                       showClear
                       style={{ width: '100%' }}
+                    />
+                  </Col>
+                </Row>
+              </Card>
+
+              {/* 速率限制 */}
+              <Card className='!rounded-2xl shadow-sm border-0'>
+                <div className='flex items-center mb-2'>
+                  <Avatar
+                    size='small'
+                    color='orange'
+                    className='mr-2 shadow-md'
+                  >
+                    <IconLink size={16} />
+                  </Avatar>
+                  <div>
+                    <Text className='text-lg font-medium'>{t('速率限制')}</Text>
+                    <div className='text-xs text-gray-600'>
+                      {t('设置令牌级别的速率限制')}
+                    </div>
+                  </div>
+                </div>
+                <Row gutter={12}>
+                  <Col span={24}>
+                    <Form.Switch
+                      field='rate_limit_enabled'
+                      label={t('启用令牌速率限制')}
+                      size='default'
+                      extraText={t('系统速率限制优先生效，令牌限制将按更严格规则生效')}
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.InputNumber
+                      field='rate_limit_duration_minutes'
+                      label={t('时间窗口（分钟）')}
+                      min={1}
+                      disabled={!values.rate_limit_enabled}
+                      placeholder={'1'}
+                      style={{ width: '100%' }}
+                      rules={[
+                        {
+                          validator: (_, value) => {
+                            if (!values.rate_limit_enabled) return true;
+                            const num = Number(value || 0);
+                            return num >= 1;
+                          },
+                          message: t('速率限制窗口必须大于0'),
+                        },
+                      ]}
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.InputNumber
+                      field='rate_limit_count'
+                      label={t('总请求数限制（含失败，0 表示不限）')}
+                      min={0}
+                      disabled={!values.rate_limit_enabled}
+                      placeholder={'0'}
+                      style={{ width: '100%' }}
+                      rules={[
+                        {
+                          validator: (_, value) => {
+                            if (!values.rate_limit_enabled) return true;
+                            const num = Number(value || 0);
+                            return num >= 0;
+                          },
+                          message: t('总请求数限制不能为负数'),
+                        },
+                      ]}
+                    />
+                  </Col>
+                  <Col span={24}>
+                    <Form.InputNumber
+                      field='rate_limit_success_count'
+                      label={t('成功请求数限制（至少 1）')}
+                      min={1}
+                      disabled={!values.rate_limit_enabled}
+                      placeholder={'1000'}
+                      style={{ width: '100%' }}
+                      rules={[
+                        {
+                          validator: (_, value) => {
+                            if (!values.rate_limit_enabled) return true;
+                            const num = Number(value || 0);
+                            return num >= 1;
+                          },
+                          message: t('成功请求数限制必须大于0'),
+                        },
+                      ]}
                     />
                   </Col>
                 </Row>

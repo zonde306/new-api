@@ -22,7 +22,7 @@ const (
 )
 
 // 检查Redis中的请求限制
-func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, maxCount int, duration int64) (bool, error) {
+func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, maxCount int, durationSeconds int64, durationMinutes int) (bool, error) {
 	// 如果maxCount为0，表示不限制
 	if maxCount == 0 {
 		return true, nil
@@ -53,8 +53,8 @@ func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, max
 	}
 	// 如果在时间窗口内已达到限制，拒绝请求
 	subTime := nowTime.Sub(oldTime).Seconds()
-	if int64(subTime) < duration {
-		rdb.Expire(ctx, key, time.Duration(setting.ModelRequestRateLimitDurationMinutes)*time.Minute)
+	if int64(subTime) < durationSeconds {
+		rdb.Expire(ctx, key, time.Duration(durationMinutes)*time.Minute)
 		return false, nil
 	}
 
@@ -62,7 +62,7 @@ func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, max
 }
 
 // 记录Redis请求
-func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxCount int) {
+func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxCount int, durationMinutes int) {
 	// 如果maxCount为0，不记录请求
 	if maxCount == 0 {
 		return
@@ -71,32 +71,31 @@ func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxC
 	now := time.Now().Format(timeFormat)
 	rdb.LPush(ctx, key, now)
 	rdb.LTrim(ctx, key, 0, int64(maxCount-1))
-	rdb.Expire(ctx, key, time.Duration(setting.ModelRequestRateLimitDurationMinutes)*time.Minute)
+	rdb.Expire(ctx, key, time.Duration(durationMinutes)*time.Minute)
 }
 
 // Redis限流处理器
-func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) gin.HandlerFunc {
+func redisRateLimitHandler(duration int64, durationMinutes int, identifier string, totalMaxCount, successMaxCount int) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		userId := strconv.Itoa(c.GetInt("id"))
 		ctx := context.Background()
 		rdb := common.RDB
 
 		// 1. 检查成功请求数限制
-		successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, userId)
-		allowed, err := checkRedisRateLimit(ctx, rdb, successKey, successMaxCount, duration)
+		successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, identifier)
+		allowed, err := checkRedisRateLimit(ctx, rdb, successKey, successMaxCount, duration, durationMinutes)
 		if err != nil {
 			fmt.Println("检查成功请求数限制失败:", err.Error())
 			abortWithOpenAiMessage(c, http.StatusInternalServerError, "rate_limit_check_failed")
 			return
 		}
 		if !allowed {
-			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", setting.ModelRequestRateLimitDurationMinutes, successMaxCount))
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到请求数限制：%d分钟内最多请求%d次", durationMinutes, successMaxCount))
 			return
 		}
 
 		//2.检查总请求数限制并记录总请求（当totalMaxCount为0时会自动跳过，使用令牌桶限流器
 		if totalMaxCount > 0 {
-			totalKey := fmt.Sprintf("rateLimit:%s", userId)
+			totalKey := fmt.Sprintf("rateLimit:%s", identifier)
 			// 初始化
 			tb := limiter.New(ctx, rdb)
 			allowed, err = tb.Allow(
@@ -114,7 +113,7 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 			}
 
 			if !allowed {
-				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", setting.ModelRequestRateLimitDurationMinutes, totalMaxCount))
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, fmt.Sprintf("您已达到总请求数限制：%d分钟内最多请求%d次，包括失败次数，请检查您的请求是否正确", durationMinutes, totalMaxCount))
 			}
 		}
 
@@ -123,19 +122,18 @@ func redisRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) g
 
 		// 5. 如果请求成功，记录成功请求
 		if c.Writer.Status() < 400 {
-			recordRedisRequest(ctx, rdb, successKey, successMaxCount)
+			recordRedisRequest(ctx, rdb, successKey, successMaxCount, durationMinutes)
 		}
 	}
 }
 
 // 内存限流处理器
-func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) gin.HandlerFunc {
-	inMemoryRateLimiter.Init(time.Duration(setting.ModelRequestRateLimitDurationMinutes) * time.Minute)
+func memoryRateLimitHandler(duration int64, durationMinutes int, identifier string, totalMaxCount, successMaxCount int) gin.HandlerFunc {
+	inMemoryRateLimiter.Init(time.Duration(durationMinutes) * time.Minute)
 
 	return func(c *gin.Context) {
-		userId := strconv.Itoa(c.GetInt("id"))
-		totalKey := ModelRequestRateLimitCountMark + userId
-		successKey := ModelRequestRateLimitSuccessCountMark + userId
+		totalKey := ModelRequestRateLimitCountMark + identifier
+		successKey := ModelRequestRateLimitSuccessCountMark + identifier
 
 		// 1. 检查总请求数限制（当totalMaxCount为0时跳过）
 		if totalMaxCount > 0 && !inMemoryRateLimiter.Request(totalKey, totalMaxCount, duration) {
@@ -167,15 +165,22 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		// 在每个请求时检查是否启用限流
-		if !setting.ModelRequestRateLimitEnabled {
+		systemEnabled := setting.ModelRequestRateLimitEnabled
+		tokenRateLimitEnabled := common.GetContextKeyBool(c, constant.ContextKeyTokenRateLimitEnabled)
+		if !systemEnabled && !tokenRateLimitEnabled {
 			c.Next()
 			return
 		}
 
-		// 计算限流参数
-		duration := int64(setting.ModelRequestRateLimitDurationMinutes * 60)
-		totalMaxCount := setting.ModelRequestRateLimitCount
-		successMaxCount := setting.ModelRequestRateLimitSuccessCount
+		// 计算系统限流参数
+		systemDurationMinutes := 0
+		systemTotalMaxCount := 0
+		systemSuccessMaxCount := 0
+		if systemEnabled {
+			systemDurationMinutes = setting.ModelRequestRateLimitDurationMinutes
+			systemTotalMaxCount = setting.ModelRequestRateLimitCount
+			systemSuccessMaxCount = setting.ModelRequestRateLimitSuccessCount
+		}
 
 		// 获取分组
 		group := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
@@ -183,18 +188,58 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 		}
 
-		//获取分组的限流配置
-		groupTotalCount, groupSuccessCount, found := setting.GetGroupRateLimit(group)
-		if found {
-			totalMaxCount = groupTotalCount
-			successMaxCount = groupSuccessCount
+		// 获取分组的系统限流配置
+		if systemEnabled {
+			systemGroupTotalCount, systemGroupSuccessCount, found := setting.GetGroupRateLimit(group)
+			if found {
+				systemTotalMaxCount = systemGroupTotalCount
+				systemSuccessMaxCount = systemGroupSuccessCount
+			}
 		}
 
+		// 计算令牌限流参数
+		tokenRateLimitEnabled = common.GetContextKeyBool(c, constant.ContextKeyTokenRateLimitEnabled)
+		tokenDurationMinutes := common.GetContextKeyInt(c, constant.ContextKeyTokenRateLimitDurationMins)
+		tokenTotalMaxCount := common.GetContextKeyInt(c, constant.ContextKeyTokenRateLimitCount)
+		tokenSuccessMaxCount := common.GetContextKeyInt(c, constant.ContextKeyTokenRateLimitSuccessCount)
+
+		// 汇总最终限流（系统优先，取更严格限制）
+		durationMinutes := systemDurationMinutes
+		totalMaxCount := systemTotalMaxCount
+		successMaxCount := systemSuccessMaxCount
+		hasLimit := totalMaxCount > 0 || successMaxCount > 0
+
+		if tokenRateLimitEnabled {
+			// 时长取较小值（更严格），允许 tokenDurationMinutes 为 0 时仅采用系统配置
+			if tokenDurationMinutes > 0 && (durationMinutes == 0 || tokenDurationMinutes < durationMinutes) {
+				durationMinutes = tokenDurationMinutes
+			}
+			// 计数取较小的正数（更严格），0 表示不限制
+			if tokenTotalMaxCount > 0 && (totalMaxCount == 0 || tokenTotalMaxCount < totalMaxCount) {
+				totalMaxCount = tokenTotalMaxCount
+			}
+			if tokenSuccessMaxCount > 0 && (successMaxCount == 0 || tokenSuccessMaxCount < successMaxCount) {
+				successMaxCount = tokenSuccessMaxCount
+			}
+			hasLimit = hasLimit || tokenTotalMaxCount > 0 || tokenSuccessMaxCount > 0
+		}
+
+		if !hasLimit {
+			c.Next()
+			return
+		}
+
+		duration := int64(durationMinutes * 60)
+
 		// 根据存储类型选择并执行限流处理器
+		identifier := strconv.Itoa(common.GetContextKeyInt(c, constant.ContextKeyTokenId))
+		if identifier == "0" {
+			identifier = strconv.Itoa(c.GetInt("id"))
+		}
 		if common.RedisEnabled {
-			redisRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
+			redisRateLimitHandler(duration, durationMinutes, identifier, totalMaxCount, successMaxCount)(c)
 		} else {
-			memoryRateLimitHandler(duration, totalMaxCount, successMaxCount)(c)
+			memoryRateLimitHandler(duration, durationMinutes, identifier, totalMaxCount, successMaxCount)(c)
 		}
 	}
 }

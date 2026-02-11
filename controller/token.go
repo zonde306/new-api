@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -13,6 +14,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func validateTokenRateLimit(token *model.Token) error {
+	if !token.RateLimitEnabled {
+		return nil
+	}
+	if token.RateLimitDurationMinute <= 0 {
+		return errors.New("速率限制窗口必须大于0")
+	}
+	if token.RateLimitSuccessCount < 1 {
+		return errors.New("成功请求数限制必须大于0")
+	}
+	if token.RateLimitCount < 0 {
+		return errors.New("总请求数限制不能为负数")
+	}
+	return nil
+}
 
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
@@ -160,6 +177,10 @@ func AddToken(c *gin.Context) {
 			return
 		}
 	}
+	if err := validateTokenRateLimit(&token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	// 检查用户令牌数量是否已达上限
 	maxTokens := operation_setting.GetMaxUserTokens()
 	count, err := model.CountUserTokens(c.GetInt("id"))
@@ -189,11 +210,15 @@ func AddToken(c *gin.Context) {
 		ExpiredTime:        token.ExpiredTime,
 		RemainQuota:        token.RemainQuota,
 		UnlimitedQuota:     token.UnlimitedQuota,
-		ModelLimitsEnabled: token.ModelLimitsEnabled,
-		ModelLimits:        token.ModelLimits,
-		AllowIps:           token.AllowIps,
-		Group:              token.Group,
-		CrossGroupRetry:    token.CrossGroupRetry,
+		ModelLimitsEnabled:      token.ModelLimitsEnabled,
+		ModelLimits:             token.ModelLimits,
+		AllowIps:                token.AllowIps,
+		RateLimitEnabled:        token.RateLimitEnabled,
+		RateLimitDurationMinute: token.RateLimitDurationMinute,
+		RateLimitCount:          token.RateLimitCount,
+		RateLimitSuccessCount:   token.RateLimitSuccessCount,
+		Group:                   token.Group,
+		CrossGroupRetry:         token.CrossGroupRetry,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -246,6 +271,10 @@ func UpdateToken(c *gin.Context) {
 			return
 		}
 	}
+	if err := validateTokenRateLimit(&token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	cleanToken, err := model.GetTokenByIds(token.Id, userId)
 	if err != nil {
 		common.ApiError(c, err)
@@ -272,6 +301,10 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
+		cleanToken.RateLimitEnabled = token.RateLimitEnabled
+		cleanToken.RateLimitDurationMinute = token.RateLimitDurationMinute
+		cleanToken.RateLimitCount = token.RateLimitCount
+		cleanToken.RateLimitSuccessCount = token.RateLimitSuccessCount
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 	}
