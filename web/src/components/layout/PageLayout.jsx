@@ -165,7 +165,7 @@ const PageLayout = () => {
         }
 
         if (data?.stats?.checked_in_today) {
-          showInfo(t('今日已签到'));
+          // showInfo(t('今日已签到'));
           markAutoCheckinDone(todayKey);
           return;
         }
