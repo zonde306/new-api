@@ -515,7 +515,7 @@ const RechargeCard = ({
           <Banner
             type='info'
             description={t(
-              '管理员未开启在线充值功能，请联系管理员开启或使用兑换码充值。',
+              '本站为公益服务，不提供充值功能，您可以签到或邀请注册来获得更多额度。',
             )}
             className='!rounded-xl'
             closeIcon={null}
