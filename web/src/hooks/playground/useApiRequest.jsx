@@ -366,12 +366,9 @@ export const useApiRequest = (
             ...prev,
             response: responseData + `\n\nError: ${errorInfo}`,
             sseMessages: [...(prev.sseMessages || []), e.data], // 即使解析失败也保存原始数据
-            isStreaming: false,
           }));
           setActiveDebugTab(DEBUG_TABS.RESPONSE);
-
-          streamMessageUpdate(t('解析响应数据时发生错误'), 'content');
-          completeMessage(MESSAGE_STATUS.ERROR);
+          // 解析失败时忽略当前消息，继续等待后续流数据
         }
       });
 
