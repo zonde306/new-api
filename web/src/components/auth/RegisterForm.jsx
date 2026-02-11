@@ -127,6 +127,15 @@ const RegisterForm = () => {
     }
   }, [statusState?.status]);
 
+  const passwordRegisterEnabled = status?.password_register_enabled ?? true;
+  const hasOAuthRegisterOptions =
+    status.github_oauth ||
+    status.discord_oauth ||
+    status.oidc_enabled ||
+    status.wechat_login ||
+    status.linuxdo_oauth ||
+    status.telegram_oauth;
+
   const [showEmailVerification, setShowEmailVerification] = useState(false);
 
   useEffect(() => {
@@ -320,6 +329,10 @@ const RegisterForm = () => {
   };
 
   const handleEmailRegisterClick = () => {
+    if (!passwordRegisterEnabled) {
+      showInfo(t('管理员关闭了通过密码进行注册，请使用第三方账户验证的形式进行注册'));
+      return;
+    }
     setEmailRegisterLoading(true);
     setShowEmailRegister(true);
     setEmailRegisterLoading(false);
@@ -489,6 +502,7 @@ const RegisterForm = () => {
                   icon={<IconMail size='large' />}
                   onClick={handleEmailRegisterClick}
                   loading={emailRegisterLoading}
+                  disabled={!passwordRegisterEnabled}
                 >
                   <span className='ml-3'>{t('使用 用户名 注册')}</span>
                 </Button>
@@ -744,15 +758,8 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailRegister ||
-        !(
-          status.github_oauth ||
-          status.discord_oauth ||
-          status.oidc_enabled ||
-          status.wechat_login ||
-          status.linuxdo_oauth ||
-          status.telegram_oauth
-        )
+        {(showEmailRegister || !hasOAuthRegisterOptions) &&
+        passwordRegisterEnabled
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}
