@@ -48,6 +48,7 @@ const OtherSetting = () => {
     Footer: '',
     About: '',
     HomePageContent: '',
+    CustomCSS: '',
   });
   let [loading, setLoading] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -81,6 +82,7 @@ const OtherSetting = () => {
     HomePageContent: false,
     About: false,
     Footer: false,
+    CustomCSS: false,
     CheckUpdate: false,
   });
   const handleInputChange = async (value, e) => {
@@ -225,6 +227,20 @@ const OtherSetting = () => {
       showError('页脚内容更新失败');
     } finally {
       setLoadingInput((loadingInput) => ({ ...loadingInput, Footer: false }));
+    }
+  };
+
+  // 个性化设置 - 自定义 CSS
+  const submitCustomCSS = async () => {
+    try {
+      setLoadingInput((loadingInput) => ({ ...loadingInput, CustomCSS: true }));
+      await updateOption('CustomCSS', inputs.CustomCSS);
+      showSuccess('自定义 CSS 已更新');
+    } catch (error) {
+      console.error('自定义 CSS 更新失败', error);
+      showError('自定义 CSS 更新失败');
+    } finally {
+      setLoadingInput((loadingInput) => ({ ...loadingInput, CustomCSS: false }));
     }
   };
 
@@ -493,6 +509,20 @@ const OtherSetting = () => {
               />
               <Button onClick={submitFooter} loading={loadingInput['Footer']}>
                 {t('设置页脚')}
+              </Button>
+              <Form.TextArea
+                label={t('自定义 CSS')}
+                placeholder={t('在此输入自定义 CSS，用于覆盖现有样式')}
+                field={'CustomCSS'}
+                onChange={handleInputChange}
+                style={{ fontFamily: 'JetBrains Mono, Consolas' }}
+                autosize={{ minRows: 6, maxRows: 12 }}
+              />
+              <Button
+                onClick={submitCustomCSS}
+                loading={loadingInput['CustomCSS']}
+              >
+                {t('设置自定义 CSS')}
               </Button>
             </Form.Section>
           </Card>

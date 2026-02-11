@@ -27,16 +27,18 @@ import React, { useContext, useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useTranslation } from 'react-i18next';
-import {
-  API,
-  getLogo,
-  getSystemName,
-  showError,
-  showInfo,
-  showSuccess,
-  renderQuota,
-  setStatusData,
-} from '../../helpers';
+  import {
+    API,
+    getLogo,
+    getSystemName,
+    getCustomCSS,
+    showError,
+    showInfo,
+    showSuccess,
+    renderQuota,
+    setStatusData,
+  } from '../../helpers';
+
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useLocation } from 'react-router-dom';
@@ -141,6 +143,29 @@ const PageLayout = () => {
       i18n.changeLanguage(savedLang);
     }
   }, [i18n]);
+
+  useEffect(() => {
+    const styleId = 'custom-css-overrides';
+    const cssContent = getCustomCSS();
+    let styleEl = document.getElementById(styleId);
+
+    if (cssContent) {
+      if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = styleId;
+        styleEl.type = 'text/css';
+        document.head.appendChild(styleEl);
+      }
+      styleEl.innerHTML = cssContent;
+    } else if (styleEl) {
+      styleEl.remove();
+    }
+
+    return () => {
+      const el = document.getElementById(styleId);
+      if (el) el.remove();
+    };
+  }, [statusState?.status?.custom_css]);
 
   useEffect(() => {
     const user = localStorage.getItem('user');

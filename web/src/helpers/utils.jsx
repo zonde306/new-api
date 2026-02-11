@@ -69,6 +69,10 @@ export function getFooterHTML() {
   return localStorage.getItem('footer_html');
 }
 
+export function getCustomCSS() {
+  return localStorage.getItem('custom_css') || '';
+}
+
 export async function copy(text) {
   let okay = true;
   try {
