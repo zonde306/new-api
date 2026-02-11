@@ -23,7 +23,7 @@ import SiderBar from './SiderBar';
 import App from '../../App';
 import FooterBar from './Footer';
 import { ToastContainer } from 'react-toastify';
-import React, { useContext, useEffect, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import { useIsMobile } from '../../hooks/common/useIsMobile';
 import { useSidebarCollapsed } from '../../hooks/common/useSidebarCollapsed';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +32,9 @@ import {
   getLogo,
   getSystemName,
   showError,
+  showInfo,
+  showSuccess,
+  renderQuota,
   setStatusData,
 } from '../../helpers';
 import { UserContext } from '../../context/User';
@@ -41,12 +44,32 @@ const { Sider, Content, Header } = Layout;
 
 const PageLayout = () => {
   const [, userDispatch] = useContext(UserContext);
-  const [, statusDispatch] = useContext(StatusContext);
+  const [statusState, statusDispatch] = useContext(StatusContext);
   const isMobile = useIsMobile();
   const [collapsed, , setCollapsed] = useSidebarCollapsed();
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const { i18n } = useTranslation();
+  const { i18n, t } = useTranslation();
   const location = useLocation();
+  const autoCheckinRef = useRef(false);
+
+  const AUTO_CHECKIN_DATE_KEY = 'auto_checkin_last_date';
+
+  const getLocalDateKeys = (date = new Date()) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return {
+      day: `${year}-${month}-${day}`,
+      month: `${year}-${month}`,
+    };
+  };
+
+  const shouldSkipAutoCheckin = (todayKey) =>
+    localStorage.getItem(AUTO_CHECKIN_DATE_KEY) === todayKey;
+
+  const markAutoCheckinDone = (todayKey) => {
+    localStorage.setItem(AUTO_CHECKIN_DATE_KEY, todayKey);
+  };
 
   const cardProPages = [
     '/console/channel',
@@ -118,6 +141,61 @@ const PageLayout = () => {
       i18n.changeLanguage(savedLang);
     }
   }, [i18n]);
+
+  useEffect(() => {
+    const user = localStorage.getItem('user');
+    if (!user) return;
+    if (!statusState?.status?.checkin_enabled) return;
+
+    const { day: todayKey, month } = getLocalDateKeys();
+    if (shouldSkipAutoCheckin(todayKey)) return;
+    if (autoCheckinRef.current) return;
+
+    autoCheckinRef.current = true;
+
+    const runAutoCheckin = async () => {
+      try {
+        const statusRes = await API.get(`/api/user/checkin?month=${month}`, {
+          skipErrorHandler: true,
+        });
+        const { success, data, message } = statusRes.data || {};
+        if (!success) {
+          showError(message || t('获取签到状态失败'));
+          return;
+        }
+
+        if (data?.stats?.checked_in_today) {
+          showInfo(t('今日已签到'));
+          markAutoCheckinDone(todayKey);
+          return;
+        }
+
+        const checkinRes = await API.post('/api/user/checkin', null, {
+          skipErrorHandler: true,
+        });
+        const {
+          success: checkinSuccess,
+          data: checkinData,
+          message: checkinMessage,
+        } = checkinRes.data || {};
+        if (checkinSuccess) {
+          showSuccess(
+            `${t('签到成功！获得')} ${renderQuota(checkinData?.quota_awarded || 0)}`,
+          );
+          markAutoCheckinDone(todayKey);
+          return;
+        }
+        showError(checkinMessage || t('签到失败'));
+        markAutoCheckinDone(todayKey);
+      } catch (error) {
+        showError(error);
+      }
+    };
+
+    runAutoCheckin().finally(() => {
+      autoCheckinRef.current = false;
+    });
+  }, [location.pathname, statusState?.status?.checkin_enabled, t]);
 
   return (
     <Layout
