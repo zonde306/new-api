@@ -13,9 +13,19 @@ import (
 //go:embed lua/rate_limit.lua
 var rateLimitScript string
 
+//go:embed lua/sliding_window.lua
+var slidingWindowScript string
+
+const (
+	SlidingWindowModeCheck         = 0
+	SlidingWindowModeCheckAndRecord = 1
+	SlidingWindowModeRecord        = 2
+)
+
 type RedisLimiter struct {
-	client         *redis.Client
-	limitScriptSHA string
+	client                 *redis.Client
+	limitScriptSHA         string
+	slidingWindowScriptSHA string
 }
 
 var (
@@ -30,9 +40,14 @@ func New(ctx context.Context, r *redis.Client) *RedisLimiter {
 		if err != nil {
 			common.SysLog(fmt.Sprintf("Failed to load rate limit script: %v", err))
 		}
+		slidingWindowSHA, err := r.ScriptLoad(ctx, slidingWindowScript).Result()
+		if err != nil {
+			common.SysLog(fmt.Sprintf("Failed to load sliding window script: %v", err))
+		}
 		instance = &RedisLimiter{
-			client:         r,
-			limitScriptSHA: limitSHA,
+			client:                 r,
+			limitScriptSHA:         limitSHA,
+			slidingWindowScriptSHA: slidingWindowSHA,
 		}
 	})
 
@@ -64,6 +79,28 @@ func (rl *RedisLimiter) Allow(ctx context.Context, key string, opts ...Option) (
 
 	if err != nil {
 		return false, fmt.Errorf("rate limit failed: %w", err)
+	}
+	return result == 1, nil
+}
+
+func (rl *RedisLimiter) SlidingWindow(ctx context.Context, key string, maxRequestNum int, windowSeconds int64, expireSeconds int64, mode int) (bool, error) {
+	if maxRequestNum <= 0 {
+		return true, nil
+	}
+	if windowSeconds <= 0 {
+		return true, nil
+	}
+	result, err := rl.client.EvalSha(
+		ctx,
+		rl.slidingWindowScriptSHA,
+		[]string{key},
+		maxRequestNum,
+		windowSeconds,
+		expireSeconds,
+		mode,
+	).Int()
+	if err != nil {
+		return false, fmt.Errorf("sliding window rate limit failed: %w", err)
 	}
 	return result == 1, nil
 }

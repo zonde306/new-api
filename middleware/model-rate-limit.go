@@ -27,51 +27,20 @@ func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, max
 	if maxCount == 0 {
 		return true, nil
 	}
-
-	// 获取当前计数
-	length, err := rdb.LLen(ctx, key).Result()
-	if err != nil {
-		return false, err
-	}
-
-	// 如果未达到限制，允许请求
-	if length < int64(maxCount) {
-		return true, nil
-	}
-
-	// 检查时间窗口
-	oldTimeStr, _ := rdb.LIndex(ctx, key, -1).Result()
-	oldTime, err := time.Parse(timeFormat, oldTimeStr)
-	if err != nil {
-		return false, err
-	}
-
-	nowTimeStr := time.Now().Format(timeFormat)
-	nowTime, err := time.Parse(timeFormat, nowTimeStr)
-	if err != nil {
-		return false, err
-	}
-	// 如果在时间窗口内已达到限制，拒绝请求
-	subTime := nowTime.Sub(oldTime).Seconds()
-	if int64(subTime) < durationSeconds {
-		rdb.Expire(ctx, key, time.Duration(durationMinutes)*time.Minute)
-		return false, nil
-	}
-
-	return true, nil
+	lim := limiter.New(ctx, rdb)
+	expireSeconds := int64(time.Duration(durationMinutes) * time.Minute / time.Second)
+	return lim.SlidingWindow(ctx, key, maxCount, durationSeconds, expireSeconds, limiter.SlidingWindowModeCheck)
 }
 
 // 记录Redis请求
-func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxCount int, durationMinutes int) {
+func recordRedisRequest(ctx context.Context, rdb *redis.Client, key string, maxCount int, durationSeconds int64, durationMinutes int) {
 	// 如果maxCount为0，不记录请求
 	if maxCount == 0 {
 		return
 	}
-
-	now := time.Now().Format(timeFormat)
-	rdb.LPush(ctx, key, now)
-	rdb.LTrim(ctx, key, 0, int64(maxCount-1))
-	rdb.Expire(ctx, key, time.Duration(durationMinutes)*time.Minute)
+	lim := limiter.New(ctx, rdb)
+	expireSeconds := int64(time.Duration(durationMinutes) * time.Minute / time.Second)
+	_, _ = lim.SlidingWindow(ctx, key, maxCount, durationSeconds, expireSeconds, limiter.SlidingWindowModeRecord)
 }
 
 // Redis限流处理器
@@ -122,7 +91,7 @@ func redisRateLimitHandler(duration int64, durationMinutes int, identifier strin
 
 		// 5. 如果请求成功，记录成功请求
 		if c.Writer.Status() < 400 {
-			recordRedisRequest(ctx, rdb, successKey, successMaxCount, durationMinutes)
+			recordRedisRequest(ctx, rdb, successKey, successMaxCount, duration, durationMinutes)
 		}
 	}
 }
