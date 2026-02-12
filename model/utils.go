@@ -2,6 +2,8 @@ package model
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -49,6 +51,122 @@ func addNewRecord(type_ int, id int, value int) {
 	}
 }
 
+type batchUpdateRecord struct {
+	key   int
+	value int
+}
+
+func getBatchUpdateWorkerCount(total int) int {
+	if total <= 1 {
+		return total
+	}
+	if common.UsingSQLite {
+		return 1
+	}
+	workerCount := common.BatchUpdateConcurrency
+	if workerCount < 1 {
+		workerCount = 1
+	}
+	if workerCount > common.BatchUpdateConcurrencyMax {
+		workerCount = common.BatchUpdateConcurrencyMax
+	}
+	if workerCount > total {
+		workerCount = total
+	}
+	return workerCount
+}
+
+func batchShardIndex(key int, workerCount int) int {
+	if workerCount <= 1 {
+		return 0
+	}
+	hash := uint64(uint(key))
+	hash ^= hash >> 33
+	hash *= 0xff51afd7ed558ccd
+	hash ^= hash >> 33
+	return int(hash % uint64(workerCount))
+}
+
+const batchUpdateRetryMaxAttempts = 3
+
+func isRetryableBatchUpdateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "database is locked") ||
+		strings.Contains(msg, "deadlock") ||
+		strings.Contains(msg, "lock wait timeout") ||
+		strings.Contains(msg, "could not serialize access")
+}
+
+func applyBatchUpdate(type_ int, key int, value int) error {
+	switch type_ {
+	case BatchUpdateTypeUserQuota:
+		return increaseUserQuota(key, value)
+	case BatchUpdateTypeTokenQuota:
+		return increaseTokenQuota(key, value)
+	case BatchUpdateTypeUsedQuota:
+		return updateUserUsedQuota(key, value)
+	case BatchUpdateTypeRequestCount:
+		return updateUserRequestCount(key, value)
+	case BatchUpdateTypeChannelUsedQuota:
+		return updateChannelUsedQuota(key, value)
+	default:
+		return fmt.Errorf("unsupported batch update type: %d", type_)
+	}
+}
+
+func processSingleBatchRecord(type_ int, key int, value int) {
+	var err error
+	for attempt := 1; attempt <= batchUpdateRetryMaxAttempts; attempt++ {
+		err = applyBatchUpdate(type_, key, value)
+		if err == nil {
+			return
+		}
+		if !isRetryableBatchUpdateError(err) || attempt == batchUpdateRetryMaxAttempts {
+			break
+		}
+		time.Sleep(time.Duration(attempt*50) * time.Millisecond)
+	}
+
+	common.SysLog(fmt.Sprintf("failed to batch update(type=%d,key=%d,value=%d), re-queued: %v", type_, key, value, err))
+	addNewRecord(type_, key, value)
+}
+
+func processBatchStore(type_ int, store map[int]int) {
+	if len(store) == 0 {
+		return
+	}
+
+	workerCount := getBatchUpdateWorkerCount(len(store))
+	if workerCount <= 1 {
+		for key, value := range store {
+			processSingleBatchRecord(type_, key, value)
+		}
+		return
+	}
+
+	shards := make([][]batchUpdateRecord, workerCount)
+	for key, value := range store {
+		idx := batchShardIndex(key, workerCount)
+		shards[idx] = append(shards[idx], batchUpdateRecord{key: key, value: value})
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+	for i := 0; i < workerCount; i++ {
+		records := shards[i]
+		go func(records []batchUpdateRecord) {
+			defer wg.Done()
+			for _, record := range records {
+				processSingleBatchRecord(type_, record.key, record.value)
+			}
+		}(records)
+	}
+	wg.Wait()
+}
+
 func batchUpdate() {
 	// check if there's any data to update
 	hasData := false
@@ -72,27 +190,7 @@ func batchUpdate() {
 		store := batchUpdateStores[i]
 		batchUpdateStores[i] = make(map[int]int)
 		batchUpdateLocks[i].Unlock()
-		// TODO: maybe we can combine updates with same key?
-		for key, value := range store {
-			switch i {
-			case BatchUpdateTypeUserQuota:
-				err := increaseUserQuota(key, value)
-				if err != nil {
-					common.SysLog("failed to batch update user quota: " + err.Error())
-				}
-			case BatchUpdateTypeTokenQuota:
-				err := increaseTokenQuota(key, value)
-				if err != nil {
-					common.SysLog("failed to batch update token quota: " + err.Error())
-				}
-			case BatchUpdateTypeUsedQuota:
-				updateUserUsedQuota(key, value)
-			case BatchUpdateTypeRequestCount:
-				updateUserRequestCount(key, value)
-			case BatchUpdateTypeChannelUsedQuota:
-				updateChannelUsedQuota(key, value)
-			}
-		}
+		processBatchStore(i, store)
 	}
 	common.SysLog("batch update finished")
 }

@@ -928,7 +928,7 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	//}
 }
 
-func updateUserUsedQuota(id int, quota int) {
+func updateUserUsedQuota(id int, quota int) error {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"used_quota": gorm.Expr("used_quota + ?", quota),
@@ -936,14 +936,18 @@ func updateUserUsedQuota(id int, quota int) {
 	).Error
 	if err != nil {
 		common.SysLog("failed to update user used quota: " + err.Error())
+		return err
 	}
+	return nil
 }
 
-func updateUserRequestCount(id int, count int) {
+func updateUserRequestCount(id int, count int) error {
 	err := DB.Model(&User{}).Where("id = ?", id).Update("request_count", gorm.Expr("request_count + ?", count)).Error
 	if err != nil {
 		common.SysLog("failed to update user request count: " + err.Error())
+		return err
 	}
+	return nil
 }
 
 // GetUsernameById gets username from Redis first, falls back to DB if needed

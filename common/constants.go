@@ -123,6 +123,8 @@ var SyncFrequency int // unit is second
 
 var BatchUpdateEnabled = false
 var BatchUpdateInterval int
+var BatchUpdateConcurrency = 1
+var BatchUpdateConcurrencyMax = 64
 
 var RelayTimeout int // unit is second
 
