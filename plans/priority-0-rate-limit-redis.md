@@ -46,7 +46,8 @@
 ### 3. 连接池与超时配置
 - 方案
   - 提供可配置 Redis PoolSize 与 Timeout 参数，并在生产环境做容量评估。
-  - 结合实际 QPS 与 RTT 调整 PoolSize 与 MaxIdleConns。
+  - 结合实际 QPS 与 RTT 调整 PoolSize 与 MinIdleConns。
+  - 已新增环境变量：`REDIS_POOL_SIZE`、`REDIS_MIN_IDLE_CONNS`、`REDIS_POOL_TIMEOUT_SECONDS`、`REDIS_DIAL_TIMEOUT_SECONDS`、`REDIS_READ_TIMEOUT_SECONDS`、`REDIS_WRITE_TIMEOUT_SECONDS`、`REDIS_MAX_CONN_AGE_SECONDS`、`REDIS_IDLE_TIMEOUT_SECONDS`、`REDIS_IDLE_CHECK_FREQUENCY_SECONDS`、`REDIS_PING_TIMEOUT_SECONDS`。
 - 涉及位置
   - [InitRedisClient()](common/redis.go:24)
 - 成功标准

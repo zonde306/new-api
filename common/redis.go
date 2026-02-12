@@ -36,10 +36,61 @@ func InitRedisClient() (err error) {
 	if err != nil {
 		FatalLog("failed to parse Redis connection string: " + err.Error())
 	}
-	opt.PoolSize = GetEnvOrDefault("REDIS_POOL_SIZE", 10)
+	poolSize := GetEnvOrDefault("REDIS_POOL_SIZE", 10)
+	if poolSize <= 0 {
+		poolSize = 10
+	}
+	opt.PoolSize = poolSize
+	minIdleConns := GetEnvOrDefault("REDIS_MIN_IDLE_CONNS", 0)
+	if minIdleConns < 0 {
+		minIdleConns = 0
+	}
+	if minIdleConns > 0 && minIdleConns > poolSize {
+		minIdleConns = poolSize
+	}
+	opt.MinIdleConns = minIdleConns
+
+	poolTimeoutSeconds := GetEnvOrDefault("REDIS_POOL_TIMEOUT_SECONDS", 0)
+	if poolTimeoutSeconds != 0 {
+		opt.PoolTimeout = time.Duration(poolTimeoutSeconds) * time.Second
+	}
+	dialTimeoutSeconds := GetEnvOrDefault("REDIS_DIAL_TIMEOUT_SECONDS", 0)
+	if dialTimeoutSeconds != 0 {
+		opt.DialTimeout = time.Duration(dialTimeoutSeconds) * time.Second
+	}
+	readTimeoutSeconds := GetEnvOrDefault("REDIS_READ_TIMEOUT_SECONDS", 0)
+	if readTimeoutSeconds != 0 {
+		opt.ReadTimeout = time.Duration(readTimeoutSeconds) * time.Second
+	}
+	writeTimeoutSeconds := GetEnvOrDefault("REDIS_WRITE_TIMEOUT_SECONDS", 0)
+	if writeTimeoutSeconds != 0 {
+		opt.WriteTimeout = time.Duration(writeTimeoutSeconds) * time.Second
+	}
+	maxConnAgeSeconds := GetEnvOrDefault("REDIS_MAX_CONN_AGE_SECONDS", 0)
+	if maxConnAgeSeconds != 0 {
+		opt.MaxConnAge = time.Duration(maxConnAgeSeconds) * time.Second
+	}
+	idleTimeoutSeconds := GetEnvOrDefault("REDIS_IDLE_TIMEOUT_SECONDS", 0)
+	if idleTimeoutSeconds != 0 {
+		opt.IdleTimeout = time.Duration(idleTimeoutSeconds) * time.Second
+	}
+	idleCheckFrequencySeconds := GetEnvOrDefault("REDIS_IDLE_CHECK_FREQUENCY_SECONDS", 0)
+	if idleCheckFrequencySeconds != 0 {
+		opt.IdleCheckFrequency = time.Duration(idleCheckFrequencySeconds) * time.Second
+	}
+
+	if DebugEnabled {
+		SysLog(fmt.Sprintf("Redis pool config: pool_size=%d, min_idle_conns=%d, pool_timeout=%s, dial_timeout=%s, read_timeout=%s, write_timeout=%s, max_conn_age=%s, idle_timeout=%s, idle_check_frequency=%s",
+			opt.PoolSize, opt.MinIdleConns, opt.PoolTimeout, opt.DialTimeout, opt.ReadTimeout, opt.WriteTimeout, opt.MaxConnAge, opt.IdleTimeout, opt.IdleCheckFrequency))
+	}
+
 	RDB = redis.NewClient(opt)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	pingTimeoutSeconds := GetEnvOrDefault("REDIS_PING_TIMEOUT_SECONDS", 5)
+	if pingTimeoutSeconds <= 0 {
+		pingTimeoutSeconds = 5
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(pingTimeoutSeconds)*time.Second)
 	defer cancel()
 
 	_, err = RDB.Ping(ctx).Result()
