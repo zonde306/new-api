@@ -65,14 +65,23 @@ func LogQuotaData(userId int, username string, modelName string, quota int, crea
 }
 
 func SaveQuotaDataCache() {
+	// 锁外落库：尽量缩短对 CacheQuotaData 的持锁时间，避免高并发日志记录被 DB 抖动阻塞。
+	// 注意：清空/换出共享 map 必须在锁内完成，否则会丢失在落库期间新增的记录。
 	CacheQuotaDataLock.Lock()
-	defer CacheQuotaDataLock.Unlock()
 	size := len(CacheQuotaData)
+	if size == 0 {
+		CacheQuotaDataLock.Unlock()
+		return
+	}
+	quotaDataCache := CacheQuotaData
+	CacheQuotaData = make(map[string]*QuotaData)
+	CacheQuotaDataLock.Unlock()
+
 	// 如果缓存中有数据，就保存到数据库中
 	// 1. 先查询数据库中是否有数据
 	// 2. 如果有数据，就更新数据
 	// 3. 如果没有数据，就插入数据
-	for _, quotaData := range CacheQuotaData {
+	for _, quotaData := range quotaDataCache {
 		quotaDataDB := &QuotaData{}
 		DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
 			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt).First(quotaDataDB)
@@ -85,7 +94,6 @@ func SaveQuotaDataCache() {
 			DB.Table("quota_data").Create(quotaData)
 		}
 	}
-	CacheQuotaData = make(map[string]*QuotaData)
 	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", size))
 }
 
