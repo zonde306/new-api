@@ -50,7 +50,8 @@ func redisRateLimitHandler(duration int64, durationMinutes int, identifier strin
 		rdb := common.RDB
 
 		// 1. 检查成功请求数限制
-		successKey := fmt.Sprintf("rateLimit:%s:%s", ModelRequestRateLimitSuccessCountMark, identifier)
+		shard := common.HashShard(identifier, common.RateLimitKeyShardCount)
+		successKey := fmt.Sprintf("rateLimit:model:%s:id:%s:%s", ModelRequestRateLimitSuccessCountMark, identifier, shard)
 		allowed, err := checkRedisRateLimit(ctx, rdb, successKey, successMaxCount, duration, durationMinutes)
 		if err != nil {
 			fmt.Println("检查成功请求数限制失败:", err.Error())
@@ -64,7 +65,7 @@ func redisRateLimitHandler(duration int64, durationMinutes int, identifier strin
 
 		//2.检查总请求数限制并记录总请求（当totalMaxCount为0时会自动跳过，使用令牌桶限流器
 		if totalMaxCount > 0 {
-			totalKey := fmt.Sprintf("rateLimit:%s", identifier)
+			totalKey := fmt.Sprintf("rateLimit:model:%s:id:%s:%s", ModelRequestRateLimitCountMark, identifier, shard)
 			// 初始化
 			tb := limiter.New(ctx, rdb)
 			allowed, err = tb.Allow(

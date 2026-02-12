@@ -19,7 +19,8 @@ var defNext = func(c *gin.Context) {
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
 	ctx := context.Background()
 	rdb := common.RDB
-	key := "rateLimit:" + mark + c.ClientIP()
+	shard := common.HashShard(c.ClientIP(), common.RateLimitKeyShardCount)
+	key := fmt.Sprintf("rateLimit:global:%s:ip:%s:%s", mark, c.ClientIP(), shard)
 	lim := limiter.New(ctx, rdb)
 	expireSeconds := int64(common.RateLimitKeyExpirationDuration.Seconds())
 	allowed, err := lim.SlidingWindow(ctx, key, maxRequestNum, duration, expireSeconds, limiter.SlidingWindowModeCheckAndRecord)
@@ -37,7 +38,7 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 }
 
 func memoryRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
-	key := mark + c.ClientIP()
+	key := fmt.Sprintf("global:%s:ip:%s", mark, c.ClientIP())
 	if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
 		c.Status(http.StatusTooManyRequests)
 		c.Abort()
@@ -100,7 +101,8 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 				c.Abort()
 				return
 			}
-			key := fmt.Sprintf("rateLimit:%s:user:%d", mark, userId)
+			shard := common.HashShard(fmt.Sprintf("%d", userId), common.RateLimitKeyShardCount)
+			key := fmt.Sprintf("rateLimit:user:%s:id:%d:%s", mark, userId, shard)
 			userRedisRateLimiter(c, maxRequestNum, duration, key)
 		}
 	}
@@ -113,7 +115,7 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 			c.Abort()
 			return
 		}
-		key := fmt.Sprintf("%s:user:%d", mark, userId)
+		key := fmt.Sprintf("user:%s:id:%d", mark, userId)
 		if !inMemoryRateLimiter.Request(key, maxRequestNum, duration) {
 			c.Status(http.StatusTooManyRequests)
 			c.Abort()
