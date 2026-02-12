@@ -1,6 +1,7 @@
 package model
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
@@ -65,6 +66,138 @@ var DB *gorm.DB
 
 var LOG_DB *gorm.DB
 
+type dbPoolConfig struct {
+	Name            string
+	DBType          string
+	MaxIdleConns    int
+	MaxOpenConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+}
+
+func getMainDBType() string {
+	if common.UsingPostgreSQL {
+		return common.DatabaseTypePostgreSQL
+	}
+	if common.UsingMySQL {
+		return common.DatabaseTypeMySQL
+	}
+	return common.DatabaseTypeSQLite
+}
+
+func getLogDBType() string {
+	switch common.LogSqlType {
+	case common.DatabaseTypeMySQL, common.DatabaseTypePostgreSQL, common.DatabaseTypeSQLite:
+		return common.LogSqlType
+	default:
+		return getMainDBType()
+	}
+}
+
+func getIntEnvWithFallback(primary string, fallback string, defaultValue int) int {
+	if primary != "" && os.Getenv(primary) != "" {
+		return common.GetEnvOrDefault(primary, defaultValue)
+	}
+	return common.GetEnvOrDefault(fallback, defaultValue)
+}
+
+func getBoolEnvWithFallback(primary string, fallback string, defaultValue bool) bool {
+	if primary != "" && os.Getenv(primary) != "" {
+		return common.GetEnvOrDefaultBool(primary, defaultValue)
+	}
+	return common.GetEnvOrDefaultBool(fallback, defaultValue)
+}
+
+func getDBPoolDefaults(dbType string) (maxIdle int, maxOpen int, maxLifetimeSec int, maxIdleTimeSec int) {
+	switch dbType {
+	case common.DatabaseTypeSQLite:
+		return 1, 1, 0, 0
+	case common.DatabaseTypePostgreSQL:
+		return 100, 1000, 60, 60
+	case common.DatabaseTypeMySQL:
+		return 100, 1000, 60, 60
+	default:
+		return 100, 1000, 60, 60
+	}
+}
+
+func buildDBPoolConfig(dbType string, name string, envPrefix string) dbPoolConfig {
+	defaultMaxIdle, defaultMaxOpen, defaultMaxLifetimeSec, defaultMaxIdleTimeSec := getDBPoolDefaults(dbType)
+
+	fallbackPrefix := "SQL"
+	if envPrefix == "SQL" {
+		fallbackPrefix = envPrefix
+	}
+
+	maxIdle := getIntEnvWithFallback(envPrefix+"_MAX_IDLE_CONNS", fallbackPrefix+"_MAX_IDLE_CONNS", defaultMaxIdle)
+	maxOpen := getIntEnvWithFallback(envPrefix+"_MAX_OPEN_CONNS", fallbackPrefix+"_MAX_OPEN_CONNS", defaultMaxOpen)
+	maxLifetimeSec := getIntEnvWithFallback(envPrefix+"_MAX_LIFETIME", fallbackPrefix+"_MAX_LIFETIME", defaultMaxLifetimeSec)
+	maxIdleTimeSec := getIntEnvWithFallback(envPrefix+"_MAX_IDLE_TIME", fallbackPrefix+"_MAX_IDLE_TIME", defaultMaxIdleTimeSec)
+
+	if maxOpen <= 0 {
+		maxOpen = defaultMaxOpen
+	}
+	if maxIdle < 0 {
+		maxIdle = defaultMaxIdle
+	}
+	if maxOpen > 0 && maxIdle > maxOpen {
+		maxIdle = maxOpen
+	}
+	if maxLifetimeSec < 0 {
+		maxLifetimeSec = defaultMaxLifetimeSec
+	}
+	if maxIdleTimeSec < 0 {
+		maxIdleTimeSec = defaultMaxIdleTimeSec
+	}
+
+	cfg := dbPoolConfig{
+		Name:            name,
+		DBType:          dbType,
+		MaxIdleConns:    maxIdle,
+		MaxOpenConns:    maxOpen,
+		ConnMaxLifetime: time.Duration(maxLifetimeSec) * time.Second,
+		ConnMaxIdleTime: time.Duration(maxIdleTimeSec) * time.Second,
+	}
+	if cfg.ConnMaxLifetime < 0 {
+		cfg.ConnMaxLifetime = 0
+	}
+	if cfg.ConnMaxIdleTime < 0 {
+		cfg.ConnMaxIdleTime = 0
+	}
+	return cfg
+}
+
+func applyDBPoolConfig(sqlDB *sql.DB, cfg dbPoolConfig) {
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
+	sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
+	common.SysLog(fmt.Sprintf("%s database pool configured: type=%s, max_idle=%d, max_open=%d, max_lifetime=%s, max_idle_time=%s",
+		cfg.Name, cfg.DBType, cfg.MaxIdleConns, cfg.MaxOpenConns, cfg.ConnMaxLifetime, cfg.ConnMaxIdleTime))
+}
+
+func buildGormConfig(dbType string, envPrefix string) *gorm.Config {
+	fallbackPrefix := "SQL"
+	if envPrefix == "SQL" {
+		fallbackPrefix = envPrefix
+	}
+
+	skipDefaultTx := getBoolEnvWithFallback(envPrefix+"_SKIP_DEFAULT_TRANSACTION", fallbackPrefix+"_SKIP_DEFAULT_TRANSACTION", false)
+	disableNestedTx := getBoolEnvWithFallback(envPrefix+"_DISABLE_NESTED_TRANSACTION", fallbackPrefix+"_DISABLE_NESTED_TRANSACTION", false)
+
+	prepareStmtDefault := true
+	if dbType == common.DatabaseTypeSQLite {
+		prepareStmtDefault = true
+	}
+	prepareStmt := getBoolEnvWithFallback(envPrefix+"_PREPARE_STMT", fallbackPrefix+"_PREPARE_STMT", prepareStmtDefault)
+
+	return &gorm.Config{
+		PrepareStmt:              prepareStmt,
+		SkipDefaultTransaction:   skipDefaultTx,
+		DisableNestedTransaction: disableNestedTx,
+	}
+}
+
 func createRootAccountIfNeed() error {
 	var user User
 	//if user.Status != common.UserStatusEnabled {
@@ -119,6 +252,10 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 	defer func() {
 		initCol()
 	}()
+	envPrefix := "SQL"
+	if isLog {
+		envPrefix = "LOG_SQL"
+	}
 	dsn := os.Getenv(envName)
 	if dsn != "" {
 		if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
@@ -132,9 +269,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			return gorm.Open(postgres.New(postgres.Config{
 				DSN:                  dsn,
 				PreferSimpleProtocol: true, // disables implicit prepared statement usage
-			}), &gorm.Config{
-				PrepareStmt: true, // precompile SQL
-			})
+			}), buildGormConfig(common.DatabaseTypePostgreSQL, envPrefix))
 		}
 		if strings.HasPrefix(dsn, "local") {
 			common.SysLog("SQL_DSN not set, using SQLite as database")
@@ -143,9 +278,7 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 			} else {
 				common.LogSqlType = common.DatabaseTypeSQLite
 			}
-			return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
-				PrepareStmt: true, // precompile SQL
-			})
+			return gorm.Open(sqlite.Open(common.SQLitePath), buildGormConfig(common.DatabaseTypeSQLite, envPrefix))
 		}
 		// Use MySQL
 		common.SysLog("using MySQL as database")
@@ -162,16 +295,12 @@ func chooseDB(envName string, isLog bool) (*gorm.DB, error) {
 		} else {
 			common.LogSqlType = common.DatabaseTypeMySQL
 		}
-		return gorm.Open(mysql.Open(dsn), &gorm.Config{
-			PrepareStmt: true, // precompile SQL
-		})
+		return gorm.Open(mysql.Open(dsn), buildGormConfig(common.DatabaseTypeMySQL, envPrefix))
 	}
 	// Use SQLite
 	common.SysLog("SQL_DSN not set, using SQLite as database")
 	common.UsingSQLite = true
-	return gorm.Open(sqlite.Open(common.SQLitePath), &gorm.Config{
-		PrepareStmt: true, // precompile SQL
-	})
+	return gorm.Open(sqlite.Open(common.SQLitePath), buildGormConfig(common.DatabaseTypeSQLite, envPrefix))
 }
 
 func InitDB() (err error) {
@@ -191,9 +320,8 @@ func InitDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
-		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		mainPoolCfg := buildDBPoolConfig(getMainDBType(), "main", "SQL")
+		applyDBPoolConfig(sqlDB, mainPoolCfg)
 
 		if !common.IsMasterNode {
 			return nil
@@ -231,9 +359,8 @@ func InitLogDB() (err error) {
 		if err != nil {
 			return err
 		}
-		sqlDB.SetMaxIdleConns(common.GetEnvOrDefault("SQL_MAX_IDLE_CONNS", 100))
-		sqlDB.SetMaxOpenConns(common.GetEnvOrDefault("SQL_MAX_OPEN_CONNS", 1000))
-		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
+		logPoolCfg := buildDBPoolConfig(getLogDBType(), "log", "LOG_SQL")
+		applyDBPoolConfig(sqlDB, logPoolCfg)
 
 		if !common.IsMasterNode {
 			return nil
