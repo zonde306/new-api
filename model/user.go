@@ -903,14 +903,13 @@ func GetRootUser() (user *User) {
 
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
-		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
+		addNewUserUsedQuotaAndRequestCountRecord(id, quota, 1)
 		return
 	}
-	updateUserUsedQuotaAndRequestCount(id, quota, 1)
+	_ = updateUserUsedQuotaAndRequestCount(id, quota, 1)
 }
 
-func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
+func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) error {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
@@ -919,13 +918,14 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	).Error
 	if err != nil {
 		common.SysLog("failed to update user used quota and request count: " + err.Error())
-		return
+		return err
 	}
 
 	//// 更新缓存
 	//if err := invalidateUserCache(id); err != nil {
 	//	common.SysError("failed to invalidate user cache: " + err.Error())
 	//}
+	return nil
 }
 
 func updateUserUsedQuota(id int, quota int) error {

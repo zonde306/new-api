@@ -51,9 +51,22 @@ func addNewRecord(type_ int, id int, value int) {
 	}
 }
 
+func addNewUserUsedQuotaAndRequestCountRecord(id int, quota int, count int) {
+	addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
+	if count != 0 {
+		addNewRecord(BatchUpdateTypeRequestCount, id, count)
+	}
+}
+
 type batchUpdateRecord struct {
 	key   int
 	value int
+}
+
+type batchUsedQuotaAndRequestCountRecord struct {
+	key   int
+	quota int
+	count int
 }
 
 func getBatchUpdateWorkerCount(total int) int {
@@ -134,6 +147,65 @@ func processSingleBatchRecord(type_ int, key int, value int) {
 	addNewRecord(type_, key, value)
 }
 
+func processSingleUserUsedQuotaAndRequestCountRecord(record batchUsedQuotaAndRequestCountRecord) {
+	var err error
+	for attempt := 1; attempt <= batchUpdateRetryMaxAttempts; attempt++ {
+		err = updateUserUsedQuotaAndRequestCount(record.key, record.quota, record.count)
+		if err == nil {
+			return
+		}
+		if !isRetryableBatchUpdateError(err) || attempt == batchUpdateRetryMaxAttempts {
+			break
+		}
+		time.Sleep(time.Duration(attempt*50) * time.Millisecond)
+	}
+
+	common.SysLog(fmt.Sprintf("failed to batch update user used quota and request count(key=%d,quota=%d,count=%d), re-queued: %v", record.key, record.quota, record.count, err))
+	addNewUserUsedQuotaAndRequestCountRecord(record.key, record.quota, record.count)
+}
+
+func processBatchUserUsedQuotaAndRequestCountStore(usedQuotaStore map[int]int, requestCountStore map[int]int) {
+	if len(usedQuotaStore) == 0 && len(requestCountStore) == 0 {
+		return
+	}
+
+	records := make([]batchUsedQuotaAndRequestCountRecord, 0, len(usedQuotaStore)+len(requestCountStore))
+	for key, quota := range usedQuotaStore {
+		records = append(records, batchUsedQuotaAndRequestCountRecord{key: key, quota: quota, count: requestCountStore[key]})
+		delete(requestCountStore, key)
+	}
+	for key, count := range requestCountStore {
+		records = append(records, batchUsedQuotaAndRequestCountRecord{key: key, quota: 0, count: count})
+	}
+
+	workerCount := getBatchUpdateWorkerCount(len(records))
+	if workerCount <= 1 {
+		for _, record := range records {
+			processSingleUserUsedQuotaAndRequestCountRecord(record)
+		}
+		return
+	}
+
+	shards := make([][]batchUsedQuotaAndRequestCountRecord, workerCount)
+	for _, record := range records {
+		idx := batchShardIndex(record.key, workerCount)
+		shards[idx] = append(shards[idx], record)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(workerCount)
+	for i := 0; i < workerCount; i++ {
+		records := shards[i]
+		go func(records []batchUsedQuotaAndRequestCountRecord) {
+			defer wg.Done()
+			for _, record := range records {
+				processSingleUserUsedQuotaAndRequestCountRecord(record)
+			}
+		}(records)
+	}
+	wg.Wait()
+}
+
 func processBatchStore(type_ int, store map[int]int) {
 	if len(store) == 0 {
 		return
@@ -185,13 +257,23 @@ func batchUpdate() {
 	}
 
 	common.SysLog("batch update started")
+	var usedQuotaStore map[int]int
+	var requestCountStore map[int]int
 	for i := 0; i < BatchUpdateTypeCount; i++ {
 		batchUpdateLocks[i].Lock()
 		store := batchUpdateStores[i]
 		batchUpdateStores[i] = make(map[int]int)
 		batchUpdateLocks[i].Unlock()
-		processBatchStore(i, store)
+		switch i {
+		case BatchUpdateTypeUsedQuota:
+			usedQuotaStore = store
+		case BatchUpdateTypeRequestCount:
+			requestCountStore = store
+		default:
+			processBatchStore(i, store)
+		}
 	}
+	processBatchUserUsedQuotaAndRequestCountStore(usedQuotaStore, requestCountStore)
 	common.SysLog("batch update finished")
 }
 

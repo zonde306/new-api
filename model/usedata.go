@@ -55,6 +55,22 @@ func logQuotaDataCache(userId int, username string, modelName string, quota int,
 	CacheQuotaData[key] = quotaData
 }
 
+func requeueQuotaDataCache(quotaData *QuotaData) {
+	CacheQuotaDataLock.Lock()
+	defer CacheQuotaDataLock.Unlock()
+
+	key := fmt.Sprintf("%d-%s-%s-%d", quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt)
+	if cached, ok := CacheQuotaData[key]; ok {
+		cached.Count += quotaData.Count
+		cached.Quota += quotaData.Quota
+		cached.TokenUsed += quotaData.TokenUsed
+		return
+	}
+
+	copied := *quotaData
+	CacheQuotaData[key] = &copied
+}
+
 func LogQuotaData(userId int, username string, modelName string, quota int, createdAt int64, tokenUsed int) {
 	// 只精确到小时
 	createdAt = createdAt - (createdAt % 3600)
@@ -77,36 +93,38 @@ func SaveQuotaDataCache() {
 	CacheQuotaData = make(map[string]*QuotaData)
 	CacheQuotaDataLock.Unlock()
 
-	// 如果缓存中有数据，就保存到数据库中
-	// 1. 先查询数据库中是否有数据
-	// 2. 如果有数据，就更新数据
-	// 3. 如果没有数据，就插入数据
+	// 优先尝试原子增量更新，若不存在再插入，减少无效查询与 DB 往返。
 	for _, quotaData := range quotaDataCache {
-		quotaDataDB := &QuotaData{}
-		DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
-			quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.CreatedAt).First(quotaDataDB)
-		if quotaDataDB.Id > 0 {
-			//quotaDataDB.Count += quotaData.Count
-			//quotaDataDB.Quota += quotaData.Quota
-			//DB.Table("quota_data").Save(quotaDataDB)
-			increaseQuotaData(quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.Count, quotaData.Quota, quotaData.CreatedAt, quotaData.TokenUsed)
-		} else {
-			DB.Table("quota_data").Create(quotaData)
+		updated, err := increaseQuotaData(quotaData.UserID, quotaData.Username, quotaData.ModelName, quotaData.Count, quotaData.Quota, quotaData.CreatedAt, quotaData.TokenUsed)
+		if err != nil {
+			common.SysLog(fmt.Sprintf("increase quotaData error, re-queued: %s", err))
+			requeueQuotaDataCache(quotaData)
+			continue
+		}
+		if updated {
+			continue
+		}
+		err = DB.Table("quota_data").Create(quotaData).Error
+		if err != nil {
+			common.SysLog(fmt.Sprintf("create quotaData error, re-queued: %s", err))
+			requeueQuotaDataCache(quotaData)
 		}
 	}
 	common.SysLog(fmt.Sprintf("保存数据看板数据成功，共保存%d条数据", size))
 }
 
-func increaseQuotaData(userId int, username string, modelName string, count int, quota int, createdAt int64, tokenUsed int) {
-	err := DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
+func increaseQuotaData(userId int, username string, modelName string, count int, quota int, createdAt int64, tokenUsed int) (bool, error) {
+	result := DB.Table("quota_data").Where("user_id = ? and username = ? and model_name = ? and created_at = ?",
 		userId, username, modelName, createdAt).Updates(map[string]interface{}{
 		"count":      gorm.Expr("count + ?", count),
 		"quota":      gorm.Expr("quota + ?", quota),
 		"token_used": gorm.Expr("token_used + ?", tokenUsed),
-	}).Error
-	if err != nil {
-		common.SysLog(fmt.Sprintf("increaseQuotaData error: %s", err))
+	})
+	if result.Error != nil {
+		common.SysLog(fmt.Sprintf("increaseQuotaData error: %s", result.Error))
+		return false, result.Error
 	}
+	return result.RowsAffected > 0, nil
 }
 
 func GetQuotaDataByUsername(username string, startTime int64, endTime int64) (quotaData []*QuotaData, err error) {
