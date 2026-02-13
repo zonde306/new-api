@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -21,6 +22,9 @@ const (
 	InitialScannerBufferSize    = 64 << 10 // 64KB (64*1024)
 	DefaultMaxScannerBufferSize = 64 << 20 // 64MB (64*1024*1024) default SSE buffer size
 	DefaultPingInterval         = 10 * time.Second
+	DefaultWriteTimeout         = 10 * time.Second
+	DefaultWriteEnqueueTimeout  = 2 * time.Second
+	DefaultWriteQueueSize       = 8
 )
 
 func getScannerBufferSize() int {
@@ -36,7 +40,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}
 
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
-	writeTimeout := 10 * time.Second
+	writeTimeout := DefaultWriteTimeout
+	writeEnqueueTimeout := DefaultWriteEnqueueTimeout
+	writeQueueSize := DefaultWriteQueueSize
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, InitialScannerBufferSize), getScannerBufferSize())
@@ -56,9 +62,27 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		println("relay max idle conns per host:", common.RelayMaxIdleConnsPerHost)
 		println("streaming timeout seconds:", int64(streamingTimeout.Seconds()))
 		println("ping interval seconds:", int64(pingInterval.Seconds()))
+		println("write timeout seconds:", int64(writeTimeout.Seconds()))
+		println("write enqueue timeout ms:", writeEnqueueTimeout.Milliseconds())
+		println("write queue size:", writeQueueSize)
 	}
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
+
+	const (
+		cancelReasonNone int32 = iota
+		cancelReasonWriteError
+		cancelReasonHandlerStop
+		cancelReasonWriteEnqueueTimeout
+		cancelReasonWriteTaskTimeout
+	)
+	var cancelReason atomic.Int32
+	setCancelReason := func(reason int32) {
+		if reason != cancelReasonNone {
+			cancelReason.CompareAndSwap(cancelReasonNone, reason)
+		}
+		cancel()
+	}
 
 	type streamWriteResult struct {
 		shouldContinue bool
@@ -76,7 +100,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		err      error
 	}
 
-	writeTaskChan := make(chan streamWriteTask, 8)
+	writeTaskChan := make(chan streamWriteTask, writeQueueSize)
 	writeWorkerDone := make(chan struct{})
 	go func() {
 		defer close(writeWorkerDone)
@@ -86,17 +110,35 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				cancel()
 			}
 		}()
-		for task := range writeTaskChan {
-			result := streamWriteResult{shouldContinue: true}
-			switch task.kind {
-			case "ping":
-				result.err = PingData(c)
-			case "data":
-				result.shouldContinue = dataHandler(task.data)
-			}
+		for {
 			select {
-			case task.result <- result:
-			default:
+			case <-ctx.Done():
+				return
+			case task, ok := <-writeTaskChan:
+				if !ok {
+					return
+				}
+
+				result := streamWriteResult{shouldContinue: true}
+				switch task.kind {
+				case "ping":
+					result.err = PingData(c)
+				case "data":
+					result.shouldContinue = dataHandler(task.data)
+				}
+
+				// 任一写入失败/handler 主动终止时，尽快取消连接，避免写入拥塞扩散。
+				if result.err != nil {
+					setCancelReason(cancelReasonWriteError)
+				}
+				if !result.shouldContinue {
+					setCancelReason(cancelReasonHandlerStop)
+				}
+
+				select {
+				case task.result <- result:
+				default:
+				}
 			}
 		}
 	}()
@@ -213,8 +255,22 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			result: resultChan,
 		}
 
+		enqueueTimer := time.NewTimer(writeEnqueueTimeout)
+		defer func() {
+			if !enqueueTimer.Stop() {
+				select {
+				case <-enqueueTimer.C:
+				default:
+				}
+			}
+		}()
+
 		select {
 		case writeTaskChan <- task:
+		case <-enqueueTimer.C:
+			logger.LogError(c, kind+" write queue enqueue timeout")
+			setCancelReason(cancelReasonWriteEnqueueTimeout)
+			return streamWriteResult{}, false
 		case <-ctx.Done():
 			return streamWriteResult{}, false
 		}
@@ -229,6 +285,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			return result, true
 		case <-writeTimeoutTimer.C:
 			logger.LogError(c, timeoutMessage)
+			setCancelReason(cancelReasonWriteTaskTimeout)
 			return streamWriteResult{}, false
 		case <-ctx.Done():
 			return streamWriteResult{}, false
@@ -261,7 +318,23 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			logger.LogError(c, "streaming timeout")
 			return
 		case <-ctx.Done():
-			logger.LogInfo(c, "client disconnected")
+			if c.Request != nil && c.Request.Context().Err() != nil {
+				logger.LogInfo(c, "client disconnected")
+				return
+			}
+
+			switch cancelReason.Load() {
+			case cancelReasonWriteError:
+				logger.LogInfo(c, "streaming canceled due to write error")
+			case cancelReasonHandlerStop:
+				logger.LogInfo(c, "streaming canceled by data handler")
+			case cancelReasonWriteEnqueueTimeout:
+				logger.LogError(c, "streaming canceled due to write queue enqueue timeout")
+			case cancelReasonWriteTaskTimeout:
+				logger.LogError(c, "streaming canceled due to write task timeout")
+			default:
+				logger.LogInfo(c, "streaming canceled")
+			}
 			return
 		case <-pingC:
 			_, ok := dispatchWriteTask("ping", "", "ping data send timeout")
