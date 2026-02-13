@@ -1,12 +1,15 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -25,6 +28,501 @@ import (
 type ModelRequest struct {
 	Model string `json:"model"`
 	Group string `json:"group,omitempty"`
+}
+
+type modelRequestCacheEntry struct {
+	ModelRequest         ModelRequest
+	ShouldSelectChannel  bool
+	RelayMode            int
+	RelayModeSet         bool
+	Platform             string
+	TokenGroup           string
+	TokenGroupSet        bool
+	ExpireAtUnixNanoTime int64
+}
+
+var (
+	modelRequestParseCache            = sync.Map{}
+	modelRequestCacheEnabled          = common.GetEnvOrDefaultBool("ROUTING_PARSE_CACHE_ENABLED", true)
+	modelRequestCacheTTL              = time.Duration(common.GetEnvOrDefault("ROUTING_PARSE_CACHE_TTL_SECONDS", 8)) * time.Second
+	modelRequestCacheBodyMaxBytes     = int64(common.GetEnvOrDefault("ROUTING_PARSE_CACHE_BODY_MAX_BYTES", 1<<20))
+	modelRequestCacheMaxQueryBytes    = int64(common.GetEnvOrDefault("ROUTING_PARSE_CACHE_MAX_QUERY_BYTES", 2048))
+	modelRequestCacheMaxEntries       = int64(common.GetEnvOrDefault("ROUTING_PARSE_CACHE_MAX_ENTRIES", 20000))
+	modelRequestCacheCleanupInterval  = time.Duration(common.GetEnvOrDefault("ROUTING_PARSE_CACHE_CLEANUP_INTERVAL_SECONDS", 15)) * time.Second
+	modelRequestCacheEntryCount       = atomic.Int64{}
+	modelRequestCacheCleanupRunning   = atomic.Bool{}
+	modelRequestCacheLastCleanupNanos = atomic.Int64{}
+	modelRequestWarmModels            = parseModelRequestWarmModels(common.GetEnvOrDefaultString("ROUTING_PARSE_CACHE_WARMUP_MODELS", "gpt-4o,gpt-4o-mini,gemini-2.0-flash"))
+	modelRequestWarmModelSet          = buildModelRequestWarmModelSet(modelRequestWarmModels)
+)
+
+func init() {
+	if !modelRequestCacheEnabled {
+		return
+	}
+	if modelRequestCacheTTL <= 0 {
+		modelRequestCacheTTL = 8 * time.Second
+	}
+	if modelRequestCacheBodyMaxBytes <= 0 {
+		modelRequestCacheBodyMaxBytes = 1 << 20
+	}
+	if modelRequestCacheMaxQueryBytes <= 0 {
+		modelRequestCacheMaxQueryBytes = 2048
+	}
+	if modelRequestCacheMaxEntries <= 0 {
+		modelRequestCacheMaxEntries = 20000
+	}
+	if modelRequestCacheCleanupInterval <= 0 {
+		modelRequestCacheCleanupInterval = 15 * time.Second
+	}
+	modelRequestCacheLastCleanupNanos.Store(time.Now().UnixNano())
+	prewarmModelRequestParseCache()
+	maybeCleanupModelRequestCache(true)
+}
+
+func parseModelRequestWarmModels(raw string) []string {
+	parts := strings.Split(raw, ",")
+	models := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		modelName := strings.TrimSpace(part)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		models = append(models, modelName)
+	}
+	slices.Sort(models)
+	return models
+}
+
+func buildModelRequestWarmModelSet(models []string) map[string]struct{} {
+	warmSet := make(map[string]struct{}, len(models))
+	for _, modelName := range models {
+		if modelName == "" {
+			continue
+		}
+		warmSet[modelName] = struct{}{}
+	}
+	return warmSet
+}
+
+func normalizeModelRequestContentType(contentType string) string {
+	contentType = strings.ToLower(strings.TrimSpace(contentType))
+	if idx := strings.Index(contentType, ";"); idx != -1 {
+		contentType = strings.TrimSpace(contentType[:idx])
+	}
+	return contentType
+}
+
+func isModelRequestWarmModel(modelName string) bool {
+	if modelName == "" {
+		return false
+	}
+	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
+		modelName = strings.TrimSuffix(modelName, ratio_setting.CompactModelSuffix)
+	}
+	_, ok := modelRequestWarmModelSet[modelName]
+	return ok
+}
+
+func modelRequestCacheTTLForModel(modelName string) time.Duration {
+	if isModelRequestWarmModel(modelName) {
+		return modelRequestCacheTTL * 3
+	}
+	return modelRequestCacheTTL
+}
+
+const modelRequestParseContextKey = "_routing_parse_cached_model_request"
+
+func setModelRequestToParseContext(c *gin.Context, request ModelRequest) {
+	if c == nil {
+		return
+	}
+	c.Set(modelRequestParseContextKey, request)
+}
+
+func getModelRequestFromParseContext(c *gin.Context) (ModelRequest, bool) {
+	if c == nil {
+		return ModelRequest{}, false
+	}
+	raw, ok := c.Get(modelRequestParseContextKey)
+	if !ok {
+		return ModelRequest{}, false
+	}
+	request, ok := raw.(ModelRequest)
+	if !ok {
+		return ModelRequest{}, false
+	}
+	return request, true
+}
+
+func getModelRequestCacheTokenScope(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	raw, ok := common.GetContextKey(c, constant.ContextKeyTokenId)
+	if !ok || raw == nil {
+		return ""
+	}
+	var tokenScope string
+	switch v := raw.(type) {
+	case string:
+		tokenScope = v
+	case int:
+		tokenScope = strconv.Itoa(v)
+	case int8:
+		tokenScope = strconv.FormatInt(int64(v), 10)
+	case int16:
+		tokenScope = strconv.FormatInt(int64(v), 10)
+	case int32:
+		tokenScope = strconv.FormatInt(int64(v), 10)
+	case int64:
+		tokenScope = strconv.FormatInt(v, 10)
+	case uint:
+		tokenScope = strconv.FormatUint(uint64(v), 10)
+	case uint8:
+		tokenScope = strconv.FormatUint(uint64(v), 10)
+	case uint16:
+		tokenScope = strconv.FormatUint(uint64(v), 10)
+	case uint32:
+		tokenScope = strconv.FormatUint(uint64(v), 10)
+	case uint64:
+		tokenScope = strconv.FormatUint(v, 10)
+	default:
+		tokenScope = fmt.Sprintf("%v", raw)
+	}
+	return strings.ReplaceAll(tokenScope, "|", "_")
+}
+
+func buildModelRequestCacheKeyFromBody(method, path, contentType, tokenScope string, body []byte) string {
+	normalizedCT := normalizeModelRequestContentType(contentType)
+	checksum := sha256.Sum256(body)
+	return fmt.Sprintf("t=%s|m=%s|p=%s|ct=%s|l=%d|h=%x", tokenScope, method, path, normalizedCT, len(body), checksum)
+}
+
+func isModelRequestModelWarmPath(path string) bool {
+	switch path {
+	case "/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/responses", "/v1/responses/compact":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeModelNameForModelWarmCache(modelName string) string {
+	modelName = strings.TrimSpace(modelName)
+	if modelName == "" {
+		return ""
+	}
+	if strings.HasSuffix(modelName, ratio_setting.CompactModelSuffix) {
+		modelName = strings.TrimSuffix(modelName, ratio_setting.CompactModelSuffix)
+	}
+	return modelName
+}
+
+func buildModelRequestWarmCacheKeyForModel(method, path, tokenScope, modelName string) string {
+	return fmt.Sprintf("t=%s|m=%s|p=%s|wm=%s", tokenScope, method, path, modelName)
+}
+
+func extractModelNameForModelRequestWarmCache(c *gin.Context) (string, bool) {
+	if c == nil || c.Request == nil {
+		return "", false
+	}
+	contentType := normalizeModelRequestContentType(c.Request.Header.Get("Content-Type"))
+	if !strings.Contains(contentType, "json") {
+		return "", false
+	}
+	if request, ok := getModelRequestFromParseContext(c); ok {
+		modelName := normalizeModelNameForModelWarmCache(request.Model)
+		if modelName == "" {
+			return "", false
+		}
+		return modelName, true
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return "", false
+	}
+	if storage.Size() > modelRequestCacheBodyMaxBytes {
+		return "", false
+	}
+	bodyBytes, err := storage.Bytes()
+	if err != nil {
+		return "", false
+	}
+	var request ModelRequest
+	if err := common.Unmarshal(bodyBytes, &request); err != nil {
+		return "", false
+	}
+	setModelRequestToParseContext(c, request)
+	modelName := normalizeModelNameForModelWarmCache(request.Model)
+	if modelName == "" {
+		return "", false
+	}
+	return modelName, true
+}
+
+func buildModelRequestModelWarmCacheKeyWithTokenScope(c *gin.Context, tokenScope string, allowEmptyToken bool) (string, bool) {
+	if !modelRequestCacheEnabled {
+		return "", false
+	}
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "", false
+	}
+	if !allowEmptyToken && tokenScope == "" {
+		return "", false
+	}
+	method := c.Request.Method
+	path := c.Request.URL.Path
+	if method != http.MethodPost || !isModelRequestModelWarmPath(path) {
+		return "", false
+	}
+	modelName, ok := extractModelNameForModelRequestWarmCache(c)
+	if !ok {
+		return "", false
+	}
+	return buildModelRequestWarmCacheKeyForModel(method, path, tokenScope, modelName), true
+}
+
+func buildModelRequestCacheKeyWithTokenScope(c *gin.Context, tokenScope string, allowEmptyToken bool) (string, bool) {
+	if !modelRequestCacheEnabled {
+		return "", false
+	}
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "", false
+	}
+	if !allowEmptyToken && tokenScope == "" {
+		return "", false
+	}
+
+	method := c.Request.Method
+	path := c.Request.URL.Path
+	if method == http.MethodGet {
+		rawQuery := c.Request.URL.RawQuery
+		if int64(len(rawQuery)) > modelRequestCacheMaxQueryBytes {
+			return "", false
+		}
+		queryChecksum := sha256.Sum256([]byte(rawQuery))
+		return fmt.Sprintf("t=%s|m=%s|p=%s|ql=%d|qh=%x", tokenScope, method, path, len(rawQuery), queryChecksum), true
+	}
+
+	if strings.Contains(path, "/suno/") ||
+		(strings.Contains(path, "/v1/videos/") && strings.HasSuffix(path, "/remix")) ||
+		strings.HasPrefix(path, "/v1beta/models/") ||
+		strings.HasPrefix(path, "/v1/models/") {
+		return fmt.Sprintf("t=%s|m=%s|p=%s", tokenScope, method, path), true
+	}
+
+	if method == http.MethodPost && isModelRequestModelWarmPath(path) {
+		if modelWarmKey, ok := buildModelRequestModelWarmCacheKeyWithTokenScope(c, tokenScope, allowEmptyToken); ok {
+			return modelWarmKey, true
+		}
+	}
+
+	contentType := normalizeModelRequestContentType(c.Request.Header.Get("Content-Type"))
+	if strings.Contains(contentType, "multipart/form-data") {
+		return "", false
+	}
+
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return "", false
+	}
+	if storage.Size() > modelRequestCacheBodyMaxBytes {
+		return "", false
+	}
+	bodyBytes, err := storage.Bytes()
+	if err != nil {
+		return "", false
+	}
+
+	return buildModelRequestCacheKeyFromBody(method, path, contentType, tokenScope, bodyBytes), true
+}
+
+func buildModelRequestCacheKey(c *gin.Context) (string, bool) {
+	tokenScope := getModelRequestCacheTokenScope(c)
+	return buildModelRequestCacheKeyWithTokenScope(c, tokenScope, false)
+}
+
+func buildModelRequestModelWarmCacheKey(c *gin.Context) (string, bool) {
+	return buildModelRequestModelWarmCacheKeyWithTokenScope(c, "", true)
+}
+
+func decreaseModelRequestCacheEntryCount(delta int64) {
+	if delta <= 0 {
+		return
+	}
+	for {
+		current := modelRequestCacheEntryCount.Load()
+		next := current - delta
+		if next < 0 {
+			next = 0
+		}
+		if modelRequestCacheEntryCount.CompareAndSwap(current, next) {
+			return
+		}
+	}
+}
+
+func deleteModelRequestCacheByKey(cacheKey any) bool {
+	if cacheKey == nil {
+		return false
+	}
+	if _, loaded := modelRequestParseCache.LoadAndDelete(cacheKey); loaded {
+		decreaseModelRequestCacheEntryCount(1)
+		return true
+	}
+	return false
+}
+
+func maybeCleanupModelRequestCache(force bool) {
+	nowNanos := time.Now().UnixNano()
+	if !force {
+		lastCleanup := modelRequestCacheLastCleanupNanos.Load()
+		if lastCleanup > 0 && nowNanos-lastCleanup < int64(modelRequestCacheCleanupInterval) {
+			return
+		}
+	}
+	if !modelRequestCacheCleanupRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer modelRequestCacheCleanupRunning.Store(false)
+
+	nowNanos = time.Now().UnixNano()
+	modelRequestCacheLastCleanupNanos.Store(nowNanos)
+	modelRequestParseCache.Range(func(key, value any) bool {
+		entry, ok := value.(*modelRequestCacheEntry)
+		if !ok || entry == nil || nowNanos > entry.ExpireAtUnixNanoTime {
+			deleteModelRequestCacheByKey(key)
+		}
+		return true
+	})
+}
+
+func getModelRequestCache(cacheKey string) (*modelRequestCacheEntry, bool) {
+	if cacheKey == "" {
+		return nil, false
+	}
+	maybeCleanupModelRequestCache(false)
+	cached, ok := modelRequestParseCache.Load(cacheKey)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := cached.(*modelRequestCacheEntry)
+	if !ok || entry == nil {
+		deleteModelRequestCacheByKey(cacheKey)
+		return nil, false
+	}
+	if time.Now().UnixNano() > entry.ExpireAtUnixNanoTime {
+		deleteModelRequestCacheByKey(cacheKey)
+		return nil, false
+	}
+	return entry, true
+}
+
+func setModelRequestCache(cacheKey string, entry *modelRequestCacheEntry) {
+	if cacheKey == "" || entry == nil {
+		return
+	}
+	maybeCleanupModelRequestCache(false)
+	ttl := modelRequestCacheTTLForModel(entry.ModelRequest.Model)
+	entry.ExpireAtUnixNanoTime = time.Now().Add(ttl).UnixNano()
+
+	for {
+		if modelRequestCacheEntryCount.Load() >= modelRequestCacheMaxEntries {
+			maybeCleanupModelRequestCache(true)
+			if modelRequestCacheEntryCount.Load() >= modelRequestCacheMaxEntries {
+				return
+			}
+		}
+		existingValue, loaded := modelRequestParseCache.LoadOrStore(cacheKey, entry)
+		if !loaded {
+			modelRequestCacheEntryCount.Add(1)
+			return
+		}
+		if modelRequestParseCache.CompareAndSwap(cacheKey, existingValue, entry) {
+			return
+		}
+		// 并发下 key 可能在 LoadOrStore 与更新之间被删除或替换，重试可避免计数漂移。
+	}
+}
+
+func buildModelRequestCacheEntryFromContext(c *gin.Context, modelRequest *ModelRequest, shouldSelectChannel bool) *modelRequestCacheEntry {
+	if modelRequest == nil {
+		return nil
+	}
+	entry := &modelRequestCacheEntry{
+		ModelRequest:        *modelRequest,
+		ShouldSelectChannel: shouldSelectChannel,
+	}
+	if relayModeRaw, ok := c.Get("relay_mode"); ok {
+		if relayMode, castOk := relayModeRaw.(int); castOk {
+			entry.RelayMode = relayMode
+			entry.RelayModeSet = true
+		}
+	}
+	if platformRaw, ok := c.Get("platform"); ok {
+		if platform, castOk := platformRaw.(string); castOk {
+			entry.Platform = platform
+		}
+	}
+	if tokenGroupRaw, ok := common.GetContextKey(c, constant.ContextKeyTokenGroup); ok {
+		if tokenGroup, castOk := tokenGroupRaw.(string); castOk {
+			entry.TokenGroup = tokenGroup
+			entry.TokenGroupSet = true
+		}
+	}
+	return entry
+}
+
+func applyModelRequestCacheEntry(c *gin.Context, entry *modelRequestCacheEntry) {
+	if c == nil || entry == nil {
+		return
+	}
+	if entry.RelayModeSet {
+		c.Set("relay_mode", entry.RelayMode)
+	}
+	if entry.Platform != "" {
+		c.Set("platform", entry.Platform)
+	}
+	if entry.TokenGroupSet {
+		common.SetContextKey(c, constant.ContextKeyTokenGroup, entry.TokenGroup)
+	}
+}
+
+func prewarmModelRequestParseCache() {
+	if len(modelRequestWarmModels) == 0 {
+		return
+	}
+	modelWarmPaths := []string{
+		"/v1/chat/completions",
+		"/v1/completions",
+		"/v1/embeddings",
+		"/v1/responses",
+		"/v1/responses/compact",
+	}
+
+	for _, modelName := range modelRequestWarmModels {
+		normalizedModelName := normalizeModelNameForModelWarmCache(modelName)
+		if normalizedModelName == "" {
+			continue
+		}
+		for _, path := range modelWarmPaths {
+			warmedModelName := normalizedModelName
+			if path == "/v1/responses/compact" {
+				warmedModelName = ratio_setting.WithCompactModelSuffix(normalizedModelName)
+			}
+			cacheKey := buildModelRequestWarmCacheKeyForModel(http.MethodPost, path, "", normalizedModelName)
+			setModelRequestCache(cacheKey, &modelRequestCacheEntry{
+				ModelRequest:        ModelRequest{Model: warmedModelName},
+				ShouldSelectChannel: true,
+			})
+		}
+	}
 }
 
 func Distribute() func(c *gin.Context) {
@@ -165,15 +663,36 @@ func Distribute() func(c *gin.Context) {
 // - application/x-www-form-urlencoded
 // - multipart/form-data
 func getModelFromRequest(c *gin.Context) (*ModelRequest, error) {
+	if cachedModelRequest, ok := getModelRequestFromParseContext(c); ok {
+		modelRequest := cachedModelRequest
+		return &modelRequest, nil
+	}
 	var modelRequest ModelRequest
 	err := common.UnmarshalBodyReusable(c, &modelRequest)
 	if err != nil {
 		return nil, errors.New(i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 	}
+	setModelRequestToParseContext(c, modelRequest)
 	return &modelRequest, nil
 }
 
 func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
+	cacheKey, cacheEnabled := buildModelRequestCacheKey(c)
+	if cacheEnabled {
+		if entry, ok := getModelRequestCache(cacheKey); ok {
+			modelRequest := entry.ModelRequest
+			applyModelRequestCacheEntry(c, entry)
+			return &modelRequest, entry.ShouldSelectChannel, nil
+		}
+		if modelWarmKey, warmModelEnabled := buildModelRequestModelWarmCacheKey(c); warmModelEnabled && modelWarmKey != cacheKey {
+			if entry, ok := getModelRequestCache(modelWarmKey); ok {
+				modelRequest := entry.ModelRequest
+				applyModelRequestCacheEntry(c, entry)
+				return &modelRequest, entry.ShouldSelectChannel, nil
+			}
+		}
+	}
+
 	var modelRequest ModelRequest
 	shouldSelectChannel := true
 	var err error
@@ -334,7 +853,12 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") && modelRequest.Model != "" {
 		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
 	}
-	return &modelRequest, shouldSelectChannel, nil
+
+	result := &modelRequest
+	if cacheEnabled {
+		setModelRequestCache(cacheKey, buildModelRequestCacheEntryFromContext(c, result, shouldSelectChannel))
+	}
+	return result, shouldSelectChannel, nil
 }
 
 func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) *types.NewAPIError {
