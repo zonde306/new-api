@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -19,12 +20,14 @@ import (
 )
 
 const (
-	InitialScannerBufferSize    = 64 << 10 // 64KB (64*1024)
-	DefaultMaxScannerBufferSize = 64 << 20 // 64MB (64*1024*1024) default SSE buffer size
-	DefaultPingInterval         = 10 * time.Second
-	DefaultWriteTimeout         = 10 * time.Second
-	DefaultWriteEnqueueTimeout  = 2 * time.Second
-	DefaultWriteQueueSize       = 8
+	InitialScannerBufferSize     = 64 << 10 // 64KB (64*1024)
+	DefaultMaxScannerBufferSize  = 64 << 20 // 64MB (64*1024*1024) default SSE buffer size
+	DefaultPingInterval          = 10 * time.Second
+	DefaultWriteTimeout          = 10 * time.Second
+	DefaultWriteEnqueueTimeout   = 2 * time.Second
+	DefaultWriteQueueSize        = 8
+	DefaultCleanupWaitTimeout    = 2 * time.Second
+	DefaultDisconnectWaitTimeout = 1 * time.Second
 )
 
 func getScannerBufferSize() int {
@@ -43,6 +46,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	writeTimeout := DefaultWriteTimeout
 	writeEnqueueTimeout := DefaultWriteEnqueueTimeout
 	writeQueueSize := DefaultWriteQueueSize
+	cleanupWaitTimeout := DefaultCleanupWaitTimeout
+	disconnectWaitTimeout := DefaultDisconnectWaitTimeout
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, InitialScannerBufferSize), getScannerBufferSize())
@@ -65,9 +70,15 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		println("write timeout seconds:", int64(writeTimeout.Seconds()))
 		println("write enqueue timeout ms:", writeEnqueueTimeout.Milliseconds())
 		println("write queue size:", writeQueueSize)
+		println("cleanup wait timeout ms:", cleanupWaitTimeout.Milliseconds())
+		println("disconnect wait timeout ms:", disconnectWaitTimeout.Milliseconds())
 	}
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
+	var requestDone <-chan struct{}
+	if c.Request != nil {
+		requestDone = c.Request.Context().Done()
+	}
 
 	const (
 		cancelReasonNone int32 = iota
@@ -75,13 +86,38 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		cancelReasonHandlerStop
 		cancelReasonWriteEnqueueTimeout
 		cancelReasonWriteTaskTimeout
+		cancelReasonClientDisconnected
 	)
 	var cancelReason atomic.Int32
+	var clientDisconnected atomic.Bool
 	setCancelReason := func(reason int32) {
 		if reason != cancelReasonNone {
 			cancelReason.CompareAndSwap(cancelReasonNone, reason)
 		}
 		cancel()
+	}
+
+	var closeRespBodyOnce sync.Once
+	closeRespBody := func() {
+		closeRespBodyOnce.Do(func() {
+			if resp != nil && resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+		})
+	}
+	onClientDisconnected := func() {
+		clientDisconnected.Store(true)
+		setCancelReason(cancelReasonClientDisconnected)
+		closeRespBody()
+	}
+	if requestDone != nil {
+		go func() {
+			select {
+			case <-requestDone:
+				onClientDisconnected()
+			case <-ctx.Done():
+			}
+		}()
 	}
 
 	type streamWriteResult struct {
@@ -294,20 +330,23 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 	defer func() {
 		cancel()
-		if resp.Body != nil {
-			_ = resp.Body.Close()
-		}
+		closeRespBody()
 		close(writeTaskChan)
+
+		waitTimeout := cleanupWaitTimeout
+		if clientDisconnected.Load() {
+			waitTimeout = disconnectWaitTimeout
+		}
 
 		select {
 		case <-writeWorkerDone:
-		case <-time.After(5 * time.Second):
+		case <-time.After(waitTimeout):
 			logger.LogError(c, "timeout waiting for write worker to exit")
 		}
 
 		select {
 		case <-scannerDone:
-		case <-time.After(5 * time.Second):
+		case <-time.After(waitTimeout):
 			logger.LogError(c, "timeout waiting for scanner goroutine to exit")
 		}
 	}()
