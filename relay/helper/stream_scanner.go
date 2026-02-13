@@ -3,11 +3,9 @@ package helper
 import (
 	"bufio"
 	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -15,8 +13,6 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-
-	"github.com/bytedance/gopkg/util/gopool"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,28 +31,17 @@ func getScannerBufferSize() int {
 }
 
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string) bool) {
-
 	if resp == nil || dataHandler == nil {
 		return
 	}
 
-	// 确保响应体总是被关闭
-	defer func() {
-		if resp.Body != nil {
-			resp.Body.Close()
-		}
-	}()
-
 	streamingTimeout := time.Duration(constant.StreamingTimeout) * time.Second
+	writeTimeout := 10 * time.Second
 
-	var (
-		stopChan   = make(chan bool, 3) // 增加缓冲区避免阻塞
-		scanner    = bufio.NewScanner(resp.Body)
-		ticker     = time.NewTicker(streamingTimeout)
-		pingTicker *time.Ticker
-		writeMutex sync.Mutex     // Mutex to protect concurrent writes
-		wg         sync.WaitGroup // 用于等待所有 goroutine 退出
-	)
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, InitialScannerBufferSize), getScannerBufferSize())
+	scanner.Split(bufio.ScanLines)
+	SetEventStreamHeaders(c)
 
 	generalSettings := operation_setting.GetGeneralSetting()
 	pingEnabled := generalSettings.PingIntervalEnabled && !info.DisablePing
@@ -65,12 +50,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		pingInterval = DefaultPingInterval
 	}
 
-	if pingEnabled {
-		pingTicker = time.NewTicker(pingInterval)
-	}
-
 	if common.DebugEnabled {
-		// print timeout and ping interval for debugging
 		println("relay timeout seconds:", common.RelayTimeout)
 		println("relay max idle conns:", common.RelayMaxIdleConns)
 		println("relay max idle conns per host:", common.RelayMaxIdleConnsPerHost)
@@ -78,195 +58,251 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 		println("ping interval seconds:", int64(pingInterval.Seconds()))
 	}
 
-	// 改进资源清理，确保所有 goroutine 正确退出
-	defer func() {
-		// 通知所有 goroutine 停止
-		common.SafeSendBool(stopChan, true)
+	ctx, cancel := context.WithCancel(c.Request.Context())
 
-		ticker.Stop()
-		if pingTicker != nil {
-			pingTicker.Stop()
-		}
-
-		// 等待所有 goroutine 退出，最多等待5秒
-		done := make(chan struct{})
-		gopool.Go(func() {
-			wg.Wait()
-			close(done)
-		})
-
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			logger.LogError(c, "timeout waiting for goroutines to exit")
-		}
-
-		close(stopChan)
-	}()
-
-	scanner.Buffer(make([]byte, InitialScannerBufferSize), getScannerBufferSize())
-	scanner.Split(bufio.ScanLines)
-	SetEventStreamHeaders(c)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	ctx = context.WithValue(ctx, "stop_chan", stopChan)
-
-	// Handle ping data sending with improved error handling
-	if pingEnabled && pingTicker != nil {
-		wg.Add(1)
-		gopool.Go(func() {
-			defer func() {
-				wg.Done()
-				if r := recover(); r != nil {
-					logger.LogError(c, fmt.Sprintf("ping goroutine panic: %v", r))
-					common.SafeSendBool(stopChan, true)
-				}
-				if common.DebugEnabled {
-					println("ping goroutine exited")
-				}
-			}()
-
-			// 添加超时保护，防止 goroutine 无限运行
-			maxPingDuration := 30 * time.Minute // 最大 ping 持续时间
-			pingTimeout := time.NewTimer(maxPingDuration)
-			defer pingTimeout.Stop()
-
-			for {
-				select {
-				case <-pingTicker.C:
-					// 使用超时机制防止写操作阻塞
-					done := make(chan error, 1)
-					gopool.Go(func() {
-						writeMutex.Lock()
-						defer writeMutex.Unlock()
-						done <- PingData(c)
-					})
-
-					select {
-					case err := <-done:
-						if err != nil {
-							logger.LogError(c, "ping data error: "+err.Error())
-							return
-						}
-						if common.DebugEnabled {
-							println("ping data sent")
-						}
-					case <-time.After(10 * time.Second):
-						logger.LogError(c, "ping data send timeout")
-						return
-					case <-ctx.Done():
-						return
-					case <-stopChan:
-						return
-					}
-				case <-ctx.Done():
-					return
-				case <-stopChan:
-					return
-				case <-c.Request.Context().Done():
-					// 监听客户端断开连接
-					return
-				case <-pingTimeout.C:
-					logger.LogError(c, "ping goroutine max duration reached")
-					return
-				}
-			}
-		})
+	type streamWriteResult struct {
+		shouldContinue bool
+		err            error
+	}
+	type streamWriteTask struct {
+		kind   string
+		data   string
+		result chan streamWriteResult
+	}
+	type streamScannerEvent struct {
+		data     string
+		done     bool
+		activity bool
+		err      error
 	}
 
-	// Scanner goroutine with improved error handling
-	wg.Add(1)
-	common.RelayCtxGo(ctx, func() {
+	writeTaskChan := make(chan streamWriteTask, 8)
+	writeWorkerDone := make(chan struct{})
+	go func() {
+		defer close(writeWorkerDone)
 		defer func() {
-			wg.Done()
 			if r := recover(); r != nil {
-				logger.LogError(c, fmt.Sprintf("scanner goroutine panic: %v", r))
+				logger.LogError(c, "write worker panic recovered")
+				cancel()
 			}
-			common.SafeSendBool(stopChan, true)
-			if common.DebugEnabled {
-				println("scanner goroutine exited")
+		}()
+		for task := range writeTaskChan {
+			result := streamWriteResult{shouldContinue: true}
+			switch task.kind {
+			case "ping":
+				result.err = PingData(c)
+			case "data":
+				result.shouldContinue = dataHandler(task.data)
+			}
+			select {
+			case task.result <- result:
+			default:
+			}
+		}
+	}()
+
+	scannerEventChan := make(chan streamScannerEvent, 32)
+	scannerDone := make(chan struct{})
+	go func() {
+		defer close(scannerDone)
+		defer close(scannerEventChan)
+		defer func() {
+			if r := recover(); r != nil {
+				logger.LogError(c, "scanner goroutine panic recovered")
+				cancel()
 			}
 		}()
 
 		for scanner.Scan() {
-			// 检查是否需要停止
 			select {
-			case <-stopChan:
-				return
 			case <-ctx.Done():
-				return
-			case <-c.Request.Context().Done():
 				return
 			default:
 			}
 
-			ticker.Reset(streamingTimeout)
-			data := scanner.Text()
+			line := scanner.Text()
 			if common.DebugEnabled {
-				println(data)
+				println(line)
 			}
 
-			if len(data) < 6 {
+			if strings.HasPrefix(line, "[DONE]") {
+				select {
+				case scannerEventChan <- streamScannerEvent{done: true}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			if !strings.HasPrefix(line, "data:") {
+				select {
+				case scannerEventChan <- streamScannerEvent{activity: true}:
+				case <-ctx.Done():
+				}
 				continue
 			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
-				continue
-			}
-			data = data[5:]
+
+			data := strings.TrimPrefix(line, "data:")
 			data = strings.TrimLeft(data, " ")
 			data = strings.TrimSuffix(data, "\r")
-			if !strings.HasPrefix(data, "[DONE]") {
-				info.SetFirstResponseTime()
-				info.ReceivedResponseCount++
-				// 使用超时机制防止写操作阻塞
-				done := make(chan bool, 1)
-				gopool.Go(func() {
-					writeMutex.Lock()
-					defer writeMutex.Unlock()
-					done <- dataHandler(data)
-				})
-
+			if strings.HasPrefix(data, "[DONE]") {
 				select {
-				case success := <-done:
-					if !success {
-						return
-					}
-				case <-time.After(10 * time.Second):
-					logger.LogError(c, "data handler timeout")
-					return
+				case scannerEventChan <- streamScannerEvent{done: true}:
 				case <-ctx.Done():
-					return
-				case <-stopChan:
-					return
 				}
-			} else {
-				// done, 处理完成标志，直接退出停止读取剩余数据防止出错
-				if common.DebugEnabled {
-					println("received [DONE], stopping scanner")
+				return
+			}
+			if len(data) == 0 {
+				select {
+				case scannerEventChan <- streamScannerEvent{activity: true}:
+				case <-ctx.Done():
 				}
+				continue
+			}
+
+			select {
+			case scannerEventChan <- streamScannerEvent{data: data}:
+			case <-ctx.Done():
 				return
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			if err != io.EOF {
-				logger.LogError(c, "scanner error: "+err.Error())
+		if err := scanner.Err(); err != nil && err != io.EOF {
+			select {
+			case scannerEventChan <- streamScannerEvent{err: err}:
+			case <-ctx.Done():
 			}
 		}
-	})
+	}()
 
-	// 主循环等待完成或超时
-	select {
-	case <-ticker.C:
-		// 超时处理逻辑
-		logger.LogError(c, "streaming timeout")
-	case <-stopChan:
-		// 正常结束
-		logger.LogInfo(c, "streaming finished")
-	case <-c.Request.Context().Done():
-		// 客户端断开连接
-		logger.LogInfo(c, "client disconnected")
+	streamingTimer := time.NewTimer(streamingTimeout)
+	defer streamingTimer.Stop()
+
+	writeTimeoutTimer := time.NewTimer(writeTimeout)
+	if !writeTimeoutTimer.Stop() {
+		select {
+		case <-writeTimeoutTimer.C:
+		default:
+		}
+	}
+	defer writeTimeoutTimer.Stop()
+
+	var pingTicker *time.Ticker
+	if pingEnabled {
+		pingTicker = time.NewTicker(pingInterval)
+		defer pingTicker.Stop()
+	}
+	var pingC <-chan time.Time
+	if pingTicker != nil {
+		pingC = pingTicker.C
+	}
+
+	resetTimer := func(timer *time.Timer, duration time.Duration) {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(duration)
+	}
+
+	dispatchWriteTask := func(kind, data, timeoutMessage string) (streamWriteResult, bool) {
+		resultChan := make(chan streamWriteResult, 1)
+		task := streamWriteTask{
+			kind:   kind,
+			data:   data,
+			result: resultChan,
+		}
+
+		select {
+		case writeTaskChan <- task:
+		case <-ctx.Done():
+			return streamWriteResult{}, false
+		}
+
+		resetTimer(writeTimeoutTimer, writeTimeout)
+		select {
+		case result := <-resultChan:
+			if result.err != nil {
+				logger.LogError(c, kind+" data error: "+result.err.Error())
+				return result, false
+			}
+			return result, true
+		case <-writeTimeoutTimer.C:
+			logger.LogError(c, timeoutMessage)
+			return streamWriteResult{}, false
+		case <-ctx.Done():
+			return streamWriteResult{}, false
+		}
+	}
+
+	defer func() {
+		cancel()
+		if resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		close(writeTaskChan)
+
+		select {
+		case <-writeWorkerDone:
+		case <-time.After(5 * time.Second):
+			logger.LogError(c, "timeout waiting for write worker to exit")
+		}
+
+		select {
+		case <-scannerDone:
+		case <-time.After(5 * time.Second):
+			logger.LogError(c, "timeout waiting for scanner goroutine to exit")
+		}
+	}()
+
+	for {
+		select {
+		case <-streamingTimer.C:
+			logger.LogError(c, "streaming timeout")
+			return
+		case <-ctx.Done():
+			logger.LogInfo(c, "client disconnected")
+			return
+		case <-pingC:
+			_, ok := dispatchWriteTask("ping", "", "ping data send timeout")
+			if !ok {
+				return
+			}
+			if common.DebugEnabled {
+				println("ping data sent")
+			}
+		case event, ok := <-scannerEventChan:
+			if !ok {
+				logger.LogInfo(c, "streaming finished")
+				return
+			}
+			if event.err != nil {
+				logger.LogError(c, "scanner error: "+event.err.Error())
+				return
+			}
+			if event.done {
+				if common.DebugEnabled {
+					println("received [DONE], stopping scanner")
+				}
+				logger.LogInfo(c, "streaming finished")
+				return
+			}
+			if event.activity {
+				resetTimer(streamingTimer, streamingTimeout)
+				continue
+			}
+
+			resetTimer(streamingTimer, streamingTimeout)
+			info.SetFirstResponseTime()
+			info.ReceivedResponseCount++
+
+			result, ok := dispatchWriteTask("data", event.data, "data handler timeout")
+			if !ok {
+				return
+			}
+			if !result.shouldContinue {
+				return
+			}
+		}
 	}
 }
