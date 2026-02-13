@@ -693,11 +693,35 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 	}
 
+	path := c.Request.URL.Path
+	method := c.Request.Method
+	contentType := c.Request.Header.Get("Content-Type")
+
+	// 快速路径：最常见的 JSON 请求只做一次路径命中与一次 body 解码。
+	if method == http.MethodPost && !strings.Contains(contentType, "multipart/form-data") {
+		switch path {
+		case "/v1/chat/completions", "/v1/completions", "/v1/embeddings", "/v1/responses", "/v1/responses/compact":
+			req, err := getModelFromRequest(c)
+			if err != nil {
+				return nil, false, err
+			}
+			result := &ModelRequest{Model: req.Model}
+			if path == "/v1/responses/compact" && result.Model != "" {
+				result.Model = ratio_setting.WithCompactModelSuffix(result.Model)
+			}
+			if cacheEnabled {
+				setModelRequestCache(cacheKey, buildModelRequestCacheEntryFromContext(c, result, true))
+			}
+			return result, true, nil
+		}
+	}
+
 	var modelRequest ModelRequest
 	shouldSelectChannel := true
 	var err error
-	if strings.Contains(c.Request.URL.Path, "/mj/") {
-		relayMode := relayconstant.Path2RelayModeMidjourney(c.Request.URL.Path)
+	switch {
+	case strings.Contains(path, "/mj/"):
+		relayMode := relayconstant.Path2RelayModeMidjourney(path)
 		if relayMode == relayconstant.RelayModeMidjourneyTaskFetch ||
 			relayMode == relayconstant.RelayModeMidjourneyTaskFetchByCondition ||
 			relayMode == relayconstant.RelayModeMidjourneyNotify ||
@@ -716,16 +740,15 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			if midjourneyModel == "" {
 				if !success {
 					return nil, false, fmt.Errorf("%s", i18n.T(c, i18n.MsgDistributorInvalidParseModel))
-				} else {
-					// task fetch, task fetch by condition, notify
-					shouldSelectChannel = false
 				}
+				// task fetch, task fetch by condition, notify
+				shouldSelectChannel = false
 			}
 			modelRequest.Model = midjourneyModel
 		}
 		c.Set("relay_mode", relayMode)
-	} else if strings.Contains(c.Request.URL.Path, "/suno/") {
-		relayMode := relayconstant.Path2RelaySuno(c.Request.Method, c.Request.URL.Path)
+	case strings.Contains(path, "/suno/"):
+		relayMode := relayconstant.Path2RelaySuno(method, path)
 		if relayMode == relayconstant.RelayModeSunoFetch ||
 			relayMode == relayconstant.RelayModeSunoFetchByID {
 			shouldSelectChannel = false
@@ -735,18 +758,18 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 		c.Set("platform", string(constant.TaskPlatformSuno))
 		c.Set("relay_mode", relayMode)
-	} else if strings.Contains(c.Request.URL.Path, "/v1/videos/") && strings.HasSuffix(c.Request.URL.Path, "/remix") {
+	case strings.Contains(path, "/v1/videos/") && strings.HasSuffix(path, "/remix"):
 		relayMode := relayconstant.RelayModeVideoSubmit
 		c.Set("relay_mode", relayMode)
 		shouldSelectChannel = false
-	} else if strings.Contains(c.Request.URL.Path, "/v1/videos") {
+	case strings.Contains(path, "/v1/videos"):
 		//curl https://api.openai.com/v1/videos \
 		//  -H "Authorization: Bearer $OPENAI_API_KEY" \
 		//  -F "model=sora-2" \
 		//  -F "prompt=A calico cat playing a piano on stage"
 		//	-F input_reference="@image.jpg"
 		relayMode := relayconstant.RelayModeUnknown
-		if c.Request.Method == http.MethodPost {
+		if method == http.MethodPost {
 			relayMode = relayconstant.RelayModeVideoSubmit
 			req, err := getModelFromRequest(c)
 			if err != nil {
@@ -755,81 +778,81 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			if req != nil {
 				modelRequest.Model = req.Model
 			}
-		} else if c.Request.Method == http.MethodGet {
+		} else if method == http.MethodGet {
 			relayMode = relayconstant.RelayModeVideoFetchByID
 			shouldSelectChannel = false
 		}
 		c.Set("relay_mode", relayMode)
-	} else if strings.Contains(c.Request.URL.Path, "/v1/video/generations") {
+	case strings.Contains(path, "/v1/video/generations"):
 		relayMode := relayconstant.RelayModeUnknown
-		if c.Request.Method == http.MethodPost {
+		if method == http.MethodPost {
 			req, err := getModelFromRequest(c)
 			if err != nil {
 				return nil, false, err
 			}
 			modelRequest.Model = req.Model
 			relayMode = relayconstant.RelayModeVideoSubmit
-		} else if c.Request.Method == http.MethodGet {
+		} else if method == http.MethodGet {
 			relayMode = relayconstant.RelayModeVideoFetchByID
 			shouldSelectChannel = false
 		}
 		if _, ok := c.Get("relay_mode"); !ok {
 			c.Set("relay_mode", relayMode)
 		}
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1beta/models/") || strings.HasPrefix(c.Request.URL.Path, "/v1/models/") {
+	case strings.HasPrefix(path, "/v1beta/models/") || strings.HasPrefix(path, "/v1/models/"):
 		// Gemini API 路径处理: /v1beta/models/gemini-2.0-flash:generateContent
 		relayMode := relayconstant.RelayModeGemini
-		modelName := extractModelNameFromGeminiPath(c.Request.URL.Path)
+		modelName := extractModelNameFromGeminiPath(path)
 		if modelName != "" {
 			modelRequest.Model = modelName
 		}
 		c.Set("relay_mode", relayMode)
-	} else if !strings.HasPrefix(c.Request.URL.Path, "/v1/audio/transcriptions") && !strings.Contains(c.Request.Header.Get("Content-Type"), "multipart/form-data") {
+	case !strings.HasPrefix(path, "/v1/audio/transcriptions") && !strings.Contains(contentType, "multipart/form-data"):
 		req, err := getModelFromRequest(c)
 		if err != nil {
 			return nil, false, err
 		}
 		modelRequest.Model = req.Model
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/realtime") {
+
+	if strings.HasPrefix(path, "/v1/realtime") {
 		//wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-10-01
 		modelRequest.Model = c.Query("model")
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/moderations") {
+	if strings.HasPrefix(path, "/v1/moderations") {
 		if modelRequest.Model == "" {
 			modelRequest.Model = "text-moderation-stable"
 		}
 	}
-	if strings.HasSuffix(c.Request.URL.Path, "embeddings") {
+	if strings.HasSuffix(path, "embeddings") {
 		if modelRequest.Model == "" {
 			modelRequest.Model = c.Param("model")
 		}
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
+	if strings.HasPrefix(path, "/v1/images/generations") {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")
-	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/images/edits") {
+	} else if strings.HasPrefix(path, "/v1/images/edits") {
 		//modelRequest.Model = common.GetStringIfEmpty(c.PostForm("model"), "gpt-image-1")
-		contentType := c.ContentType()
-		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, contentType) {
+		requestContentType := c.ContentType()
+		if slices.Contains([]string{gin.MIMEPOSTForm, gin.MIMEMultipartPOSTForm}, requestContentType) {
 			req, err := getModelFromRequest(c)
 			if err == nil && req.Model != "" {
 				modelRequest.Model = req.Model
 			}
 		}
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/audio") {
+	if strings.HasPrefix(path, "/v1/audio") {
 		relayMode := relayconstant.RelayModeAudioSpeech
-		if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/speech") {
-
+		if strings.HasPrefix(path, "/v1/audio/speech") {
 			modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "tts-1")
-		} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/translations") {
+		} else if strings.HasPrefix(path, "/v1/audio/translations") {
 			// 先尝试从请求读取
 			if req, err := getModelFromRequest(c); err == nil && req.Model != "" {
 				modelRequest.Model = req.Model
 			}
 			modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "whisper-1")
 			relayMode = relayconstant.RelayModeAudioTranslation
-		} else if strings.HasPrefix(c.Request.URL.Path, "/v1/audio/transcriptions") {
+		} else if strings.HasPrefix(path, "/v1/audio/transcriptions") {
 			// 先尝试从请求读取
 			if req, err := getModelFromRequest(c); err == nil && req.Model != "" {
 				modelRequest.Model = req.Model
@@ -839,7 +862,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		}
 		c.Set("relay_mode", relayMode)
 	}
-	if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
+	if strings.HasPrefix(path, "/pg/chat/completions") {
 		// playground chat completions
 		req, err := getModelFromRequest(c)
 		if err != nil {
@@ -850,7 +873,7 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") && modelRequest.Model != "" {
+	if strings.HasPrefix(path, "/v1/responses/compact") && modelRequest.Model != "" {
 		modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
 	}
 
