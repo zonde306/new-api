@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -210,6 +211,38 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),
+			})
+			return
+		}
+	case "general_setting.sse_max_concurrent_per_user":
+		v, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "sse_max_concurrent_per_user 必须是整数",
+			})
+			return
+		}
+		if v < 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "sse_max_concurrent_per_user 不能小于 0",
+			})
+			return
+		}
+	case "general_setting.sse_max_concurrent_per_token":
+		v, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "sse_max_concurrent_per_token 必须是整数",
+			})
+			return
+		}
+		if v < 0 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "sse_max_concurrent_per_token 不能小于 0",
 			})
 			return
 		}

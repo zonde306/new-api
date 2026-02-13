@@ -137,11 +137,29 @@ func chatCompletionsViaResponses(c *gin.Context, info *relaycommon.RelayInfo, ad
 	statusCodeMappingStr := c.GetString("status_code_mapping")
 
 	httpResp = resp.(*http.Response)
-	info.IsStream = info.IsStream || strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+	wasStream := info.IsStream
+	isEventStream := strings.HasPrefix(httpResp.Header.Get("Content-Type"), "text/event-stream")
+	info.IsStream = info.IsStream || isEventStream
 	if httpResp.StatusCode != http.StatusOK {
 		newApiErr := service.RelayErrorHandler(c.Request.Context(), httpResp, false)
 		service.ResetStatusCode(newApiErr, statusCodeMappingStr)
 		return nil, newApiErr
+	}
+
+	// Some upstreams may return SSE even when the request didn't declare `stream=true`.
+	// In such cases, acquire SSE concurrency slot here to avoid bypassing limits.
+	if info.IsStream && !wasStream {
+		releaseSSESlot, acquireErr := service.AcquireSSEConcurrencySlot(info.UserId, info.TokenId)
+		if acquireErr != nil {
+			if httpResp != nil && httpResp.Body != nil {
+				_ = httpResp.Body.Close()
+			}
+			return nil, types.NewOpenAIError(acquireErr, types.ErrorCodeSSEConcurrencyLimitExceeded, http.StatusTooManyRequests,
+				types.ErrOptionWithSkipRetry(),
+				types.ErrOptionWithNoRecordErrorLog(),
+			)
+		}
+		defer releaseSSESlot()
 	}
 
 	if info.IsStream {

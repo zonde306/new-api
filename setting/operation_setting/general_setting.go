@@ -14,6 +14,12 @@ type GeneralSetting struct {
 	DocsLink            string `json:"docs_link"`
 	PingIntervalEnabled bool   `json:"ping_interval_enabled"`
 	PingIntervalSeconds int    `json:"ping_interval_seconds"`
+	// 是否启用 SSE 并发限制
+	SSEConcurrencyLimitEnabled bool `json:"sse_concurrency_limit_enabled"`
+	// 单用户最大 SSE 并发连接数，<=0 表示不限制
+	SSEMaxConcurrentPerUser int `json:"sse_max_concurrent_per_user"`
+	// 单令牌最大 SSE 并发连接数，<=0 表示不限制
+	SSEMaxConcurrentPerToken int `json:"sse_max_concurrent_per_token"`
 	// 当前站点额度展示类型：USD / CNY / TOKENS
 	QuotaDisplayType string `json:"quota_display_type"`
 	// 自定义货币符号，用于 CUSTOM 展示类型
@@ -27,6 +33,9 @@ var generalSetting = GeneralSetting{
 	DocsLink:                   "https://docs.newapi.pro",
 	PingIntervalEnabled:        false,
 	PingIntervalSeconds:        60,
+	SSEConcurrencyLimitEnabled: false,
+	SSEMaxConcurrentPerUser:    0,
+	SSEMaxConcurrentPerToken:   0,
 	QuotaDisplayType:           QuotaDisplayTypeUSD,
 	CustomCurrencySymbol:       "¤",
 	CustomCurrencyExchangeRate: 1.0,

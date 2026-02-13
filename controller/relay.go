@@ -204,16 +204,33 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
+		var releaseSSESlot func()
+		if relayInfo.IsStream {
+			releaseSSESlot, err = service.AcquireSSEConcurrencySlot(relayInfo.UserId, relayInfo.TokenId)
+			if err != nil {
+				newAPIError = types.NewOpenAIError(err, types.ErrorCodeSSEConcurrencyLimitExceeded, http.StatusTooManyRequests,
+					types.ErrOptionWithSkipRetry(),
+					types.ErrOptionWithNoRecordErrorLog(),
+				)
+				break
+			}
 		}
+
+		newAPIError = func() *types.NewAPIError {
+			if releaseSSESlot != nil {
+				defer releaseSSESlot()
+			}
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				return relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				return relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				return geminiRelayHandler(c, relayInfo)
+			default:
+				return relayHandler(c, relayInfo)
+			}
+		}()
 
 		if newAPIError == nil {
 			return
