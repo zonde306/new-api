@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -22,6 +23,165 @@ type UserBase struct {
 	Status   int    `json:"status"`
 	Username string `json:"username"`
 	Setting  string `json:"setting"`
+}
+
+type userBaseLocalCacheEntry struct {
+	Value            UserBase
+	ExpireAtUnixNano int64
+}
+
+const userBaseLocalLockShardCount = 256
+
+var (
+	userBaseLocalCache                sync.Map // map[int]userBaseLocalCacheEntry
+	userBaseLocalCacheTTL             = time.Duration(common.GetEnvOrDefault("USER_BASE_LOCAL_CACHE_TTL_SECONDS", 5)) * time.Second
+	userBaseLocalCacheCleanupInterval = time.Duration(common.GetEnvOrDefault("USER_BASE_LOCAL_CACHE_CLEANUP_SECONDS", 60)) * time.Second
+	userBaseLocalLocks                [userBaseLocalLockShardCount]sync.Mutex
+	userBaseLocalJanitorStartOnce     sync.Once
+	userBaseLocalJanitorStopOnce      sync.Once
+	userBaseLocalJanitorStopCh        = make(chan struct{})
+)
+
+func init() {
+	if userBaseLocalCacheTTL <= 0 {
+		userBaseLocalCacheTTL = 5 * time.Second
+	}
+	if userBaseLocalCacheCleanupInterval <= 0 {
+		userBaseLocalCacheCleanupInterval = 60 * time.Second
+	}
+	if userBaseLocalCacheCleanupInterval > userBaseLocalCacheTTL {
+		userBaseLocalCacheCleanupInterval = userBaseLocalCacheTTL
+	}
+}
+
+func ensureUserBaseLocalCacheJanitor() {
+	if !common.MemoryCacheEnabled {
+		return
+	}
+	startUserBaseLocalCacheJanitor()
+}
+
+func startUserBaseLocalCacheJanitor() {
+	userBaseLocalJanitorStartOnce.Do(func() {
+		ticker := time.NewTicker(userBaseLocalCacheCleanupInterval)
+		go func() {
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					cleanupExpiredUserBaseLocalCache(time.Now().UnixNano())
+				case <-userBaseLocalJanitorStopCh:
+					return
+				}
+			}
+		}()
+	})
+}
+
+func stopUserBaseLocalCacheJanitor() {
+	userBaseLocalJanitorStopOnce.Do(func() {
+		close(userBaseLocalJanitorStopCh)
+	})
+}
+
+func cleanupExpiredUserBaseLocalCache(nowUnixNano int64) {
+	userBaseLocalCache.Range(func(key, value any) bool {
+		entry, ok := value.(userBaseLocalCacheEntry)
+		if !ok || nowUnixNano > entry.ExpireAtUnixNano {
+			userBaseLocalCache.Delete(key)
+		}
+		return true
+	})
+}
+
+func getUserBaseShardLock(userId int) *sync.Mutex {
+	idx := userId % userBaseLocalLockShardCount
+	if idx < 0 {
+		idx = -idx
+	}
+	return &userBaseLocalLocks[idx]
+}
+
+func getUserBaseFromLocalCache(userId int) (*UserBase, bool) {
+	if !common.MemoryCacheEnabled || userId <= 0 {
+		return nil, false
+	}
+	ensureUserBaseLocalCacheJanitor()
+	raw, ok := userBaseLocalCache.Load(userId)
+	if !ok {
+		return nil, false
+	}
+	entry, ok := raw.(userBaseLocalCacheEntry)
+	if !ok {
+		userBaseLocalCache.Delete(userId)
+		return nil, false
+	}
+	if time.Now().UnixNano() > entry.ExpireAtUnixNano {
+		userBaseLocalCache.Delete(userId)
+		return nil, false
+	}
+	cached := entry.Value
+	return &cached, true
+}
+
+func setUserBaseLocalCacheNoLock(userCache *UserBase) {
+	ttl := userBaseLocalCacheTTL
+	if ttl <= 0 {
+		ttl = 5 * time.Second
+	}
+	userBaseLocalCache.Store(userCache.Id, userBaseLocalCacheEntry{
+		Value:            *userCache,
+		ExpireAtUnixNano: time.Now().Add(ttl).UnixNano(),
+	})
+}
+
+func setUserBaseLocalCache(userCache *UserBase) {
+	if !common.MemoryCacheEnabled || userCache == nil || userCache.Id <= 0 {
+		return
+	}
+	ensureUserBaseLocalCacheJanitor()
+	lock := getUserBaseShardLock(userCache.Id)
+	lock.Lock()
+	defer lock.Unlock()
+	setUserBaseLocalCacheNoLock(userCache)
+}
+
+func deleteUserBaseLocalCache(userId int) {
+	if userId <= 0 {
+		return
+	}
+	lock := getUserBaseShardLock(userId)
+	lock.Lock()
+	defer lock.Unlock()
+	userBaseLocalCache.Delete(userId)
+}
+
+func mutateUserBaseLocalCache(userId int, mutate func(*UserBase)) {
+	if !common.MemoryCacheEnabled || userId <= 0 || mutate == nil {
+		return
+	}
+	ensureUserBaseLocalCacheJanitor()
+	lock := getUserBaseShardLock(userId)
+	lock.Lock()
+	defer lock.Unlock()
+
+	raw, ok := userBaseLocalCache.Load(userId)
+	if !ok {
+		return
+	}
+	entry, ok := raw.(userBaseLocalCacheEntry)
+	if !ok {
+		userBaseLocalCache.Delete(userId)
+		return
+	}
+	if time.Now().UnixNano() > entry.ExpireAtUnixNano {
+		userBaseLocalCache.Delete(userId)
+		return
+	}
+	next := entry.Value
+	mutate(&next)
+	entry.Value = next
+	userBaseLocalCache.Store(userId, entry)
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
@@ -51,6 +211,7 @@ func getUserCacheKey(userId int) string {
 
 // invalidateUserCache clears user cache
 func invalidateUserCache(userId int) error {
+	deleteUserBaseLocalCache(userId)
 	if !common.RedisEnabled {
 		return nil
 	}
@@ -59,19 +220,31 @@ func invalidateUserCache(userId int) error {
 
 // updateUserCache updates all user cache fields using hash
 func updateUserCache(user User) error {
+	base := user.ToBaseUser()
+	setUserBaseLocalCache(base)
 	if !common.RedisEnabled {
 		return nil
 	}
 
 	return common.RedisHSetObj(
 		getUserCacheKey(user.Id),
-		user.ToBaseUser(),
+		base,
 		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
 	)
 }
 
-// GetUserCache gets complete user cache from hash
+// GetUserCache gets complete user cache from memory -> redis -> db.
 func GetUserCache(userId int) (userCache *UserBase, err error) {
+	if userId <= 0 {
+		return nil, fmt.Errorf("invalid user id")
+	}
+
+	if common.MemoryCacheEnabled {
+		if cached, ok := getUserBaseFromLocalCache(userId); ok {
+			return cached, nil
+		}
+	}
+
 	var user *User
 	var fromDB bool
 	defer func() {
@@ -79,26 +252,26 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 		if shouldUpdateRedis(fromDB, err) && user != nil {
 			gopool.Go(func() {
 				if err := updateUserCache(*user); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
+					common.SysLog("failed to update user cache: " + err.Error())
 				}
 			})
 		}
 	}()
 
-	// Try getting from Redis first
-	userCache, err = cacheGetUserBase(userId)
-	if err == nil {
-		return userCache, nil
+	if common.RedisEnabled {
+		userCache, err = cacheGetUserBase(userId)
+		if err == nil {
+			setUserBaseLocalCache(userCache)
+			return userCache, nil
+		}
 	}
 
-	// If Redis fails, get from DB
 	fromDB = true
 	user, err = GetUserById(userId, false)
 	if err != nil {
-		return nil, err // Return nil and error if DB lookup fails
+		return nil, err
 	}
 
-	// Create cache object from user data
 	userCache = &UserBase{
 		Id:       user.Id,
 		Group:    user.Group,
@@ -108,7 +281,7 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 		Setting:  user.Setting,
 		Email:    user.Email,
 	}
-
+	setUserBaseLocalCache(userCache)
 	return userCache, nil
 }
 
@@ -126,11 +299,27 @@ func cacheGetUserBase(userId int) (*UserBase, error) {
 }
 
 // Add atomic quota operations using hash fields
+func incrUserBaseLocalQuotaCache(userId int, delta int) {
+	if delta == 0 {
+		return
+	}
+	mutateUserBaseLocalCache(userId, func(cache *UserBase) {
+		cache.Quota += delta
+	})
+}
+
 func cacheIncrUserQuota(userId int, delta int64) error {
-	if !common.RedisEnabled {
+	if delta == 0 {
 		return nil
 	}
-	return common.RedisHIncrBy(getUserCacheKey(userId), "Quota", delta)
+	if common.RedisEnabled {
+		if err := common.RedisHIncrBy(getUserCacheKey(userId), "Quota", delta); err != nil {
+			deleteUserBaseLocalCache(userId)
+			return err
+		}
+	}
+	incrUserBaseLocalQuotaCache(userId, int(delta))
+	return nil
 }
 
 func cacheDecrUserQuota(userId int, delta int64) error {
@@ -180,17 +369,23 @@ func getUserSettingCache(userId int) (dto.UserSetting, error) {
 
 // New functions for individual field updates
 func updateUserStatusCache(userId int, status bool) error {
-	if !common.RedisEnabled {
-		return nil
-	}
 	statusInt := common.UserStatusEnabled
 	if !status {
 		statusInt = common.UserStatusDisabled
+	}
+	mutateUserBaseLocalCache(userId, func(cache *UserBase) {
+		cache.Status = statusInt
+	})
+	if !common.RedisEnabled {
+		return nil
 	}
 	return common.RedisHSetField(getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt))
 }
 
 func updateUserQuotaCache(userId int, quota int) error {
+	mutateUserBaseLocalCache(userId, func(cache *UserBase) {
+		cache.Quota = quota
+	})
 	if !common.RedisEnabled {
 		return nil
 	}
@@ -198,6 +393,9 @@ func updateUserQuotaCache(userId int, quota int) error {
 }
 
 func updateUserGroupCache(userId int, group string) error {
+	mutateUserBaseLocalCache(userId, func(cache *UserBase) {
+		cache.Group = group
+	})
 	if !common.RedisEnabled {
 		return nil
 	}
@@ -209,6 +407,9 @@ func UpdateUserGroupCache(userId int, group string) error {
 }
 
 func updateUserNameCache(userId int, username string) error {
+	mutateUserBaseLocalCache(userId, func(cache *UserBase) {
+		cache.Username = username
+	})
 	if !common.RedisEnabled {
 		return nil
 	}
@@ -216,6 +417,9 @@ func updateUserNameCache(userId int, username string) error {
 }
 
 func updateUserSettingCache(userId int, setting string) error {
+	mutateUserBaseLocalCache(userId, func(cache *UserBase) {
+		cache.Setting = setting
+	})
 	if !common.RedisEnabled {
 		return nil
 	}
