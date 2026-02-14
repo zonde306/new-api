@@ -238,10 +238,12 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			return
 		}
 
-		// 获取分组（用于分组配置以及 IP-Group 限制）
-		group := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		// 获取用户分组与令牌分组（用于分组配置以及 IP-Group 限制）
+		tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
+		userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+		group := tokenGroup
 		if group == "" {
-			group = common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+			group = userGroup
 		}
 
 		policies := make([]modelRateLimitPolicy, 0, 4)
@@ -256,8 +258,11 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			systemDurationMinutes = setting.ModelRequestRateLimitDurationMinutes
 			systemTotalMaxCount = setting.ModelRequestRateLimitCount
 			systemSuccessMaxCount = setting.ModelRequestRateLimitSuccessCount
-			// 分组覆盖
-			systemGroupTotalCount, systemGroupSuccessCount, found := setting.GetGroupRateLimit(group)
+			// 分组覆盖：优先新语法（用户分组->令牌分组），其次兼容旧语法（分组名）
+			systemGroupTotalCount, systemGroupSuccessCount, found := setting.GetGroupRateLimitByUserAndToken(userGroup, tokenGroup)
+			if !found {
+				systemGroupTotalCount, systemGroupSuccessCount, found = setting.GetGroupRateLimit(group)
+			}
 			if found {
 				systemTotalMaxCount = systemGroupTotalCount
 				systemSuccessMaxCount = systemGroupSuccessCount
@@ -333,10 +338,25 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 
 			// group + ip（按 JSON 分组配置）
 			if group != "" {
-				groupTotalCount, groupSuccessCount, found := setting.GetIPGroupRateLimit(group)
+				groupTotalCount, groupSuccessCount, found := setting.GetIPGroupRateLimitByUserAndToken(userGroup, tokenGroup)
+				identifier := ""
+				if found {
+					normalizedTokenGroup := tokenGroup
+					if normalizedTokenGroup == "" {
+						normalizedTokenGroup = userGroup
+					}
+					// 新语法命中时，key 必须包含 userGroup + tokenGroup，避免不同用户分组互相影响
+					identifier = fmt.Sprintf("ip:g:u:%s:t:%s:%s", userGroup, normalizedTokenGroup, clientIp)
+				} else {
+					groupTotalCount, groupSuccessCount, found = setting.GetIPGroupRateLimit(group)
+					if found {
+						// 兼容旧语法：仅按 group + ip 限流
+						identifier = fmt.Sprintf("ip:g:%s:%s", group, clientIp)
+					}
+				}
 				if found {
 					policies = appendPolicyIfHasLimit(policies, modelRateLimitPolicy{
-						Identifier:      fmt.Sprintf("ip:g:%s:%s", group, clientIp),
+						Identifier:      identifier,
 						DurationMinutes: ipDurationMinutes,
 						TotalMaxCount:   groupTotalCount,
 						SuccessMaxCount: groupSuccessCount,

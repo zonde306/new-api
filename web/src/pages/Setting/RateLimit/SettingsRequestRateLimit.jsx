@@ -187,7 +187,7 @@ export default function RequestRateLimit(props) {
                 <Form.TextArea
                   label={t('分组速率限制')}
                   placeholder={t(
-                    '{\n  "default": [200, 100],\n  "vip": [0, 1000]\n}',
+                    '{\n  "default": [200, 100],\n  "vip": [0, 1000],\n  "unlimited": {\n    "default": [1000, 1000],\n    "auto": [2000, 2000]\n  }\n}',
                   )}
                   field={'ModelRequestRateLimitGroup'}
                   autosize={{ minRows: 5, maxRows: 15 }}
@@ -205,12 +205,12 @@ export default function RequestRateLimit(props) {
                       <ul>
                         <li>
                           {t(
-                            '使用 JSON 对象格式，格式为：{"组名": [最多请求次数, 最多请求完成次数]}',
+                            '支持两种 JSON 语法：旧语法 {"组名": [最多请求次数, 最多请求完成次数]}；新语法 {"用户分组": {"令牌分组": [最多请求次数, 最多请求完成次数]}}。',
                           )}
                         </li>
                         <li>
                           {t(
-                            '示例：{"default": [200, 100], "vip": [0, 1000]}。',
+                            '示例：{"default": [200, 100], "vip": [0, 1000], "unlimited": {"default": [1000, 1000], "auto": [2000, 2000]}}。',
                           )}
                         </li>
                         <li>
@@ -312,7 +312,7 @@ export default function RequestRateLimit(props) {
                 <Form.TextArea
                   label={t('分组+IP 每周期最多请求次数')}
                   placeholder={t(
-                    '{\n  "default": [30, 60],\n  "vip": [0, 1000]\n}',
+                    '{\n  "default": [30, 60],\n  "vip": [0, 1000],\n  "unlimited": {\n    "default": [300, 600],\n    "auto": [600, 1200]\n  }\n}',
                   )}
                   field={'ModelRequestIPRateLimitGroup'}
                   autosize={{ minRows: 5, maxRows: 15 }}
@@ -330,12 +330,12 @@ export default function RequestRateLimit(props) {
                       <ul>
                         <li>
                           {t(
-                            '使用 JSON 对象格式，格式为：{"组名": [最多请求次数, 最多请求完成次数]}',
+                            '支持两种 JSON 语法：旧语法 {"组名": [最多请求次数, 最多请求完成次数]}；新语法 {"用户分组": {"令牌分组": [最多请求次数, 最多请求完成次数]}}。',
                           )}
                         </li>
                         <li>
                           {t(
-                            '示例：{"default": [30, 60], "vip": [0, 1000]}。',
+                            '示例：{"default": [30, 60], "vip": [0, 1000], "unlimited": {"default": [300, 600], "auto": [600, 1200]}}。',
                           )}
                         </li>
                         <li>
