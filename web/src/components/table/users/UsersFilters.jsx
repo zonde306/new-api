@@ -76,8 +76,27 @@ const UsersFilters = ({
             field='searchGroup'
             placeholder={t('选择分组')}
             optionList={groupOptions}
-            onChange={(value) => {
+            onChange={() => {
               // Group change triggers automatic search
+              setTimeout(() => {
+                searchUsers(1, pageSize);
+              }, 100);
+            }}
+            className='w-full'
+            showClear
+            pure
+            size='small'
+          />
+        </div>
+        <div className='w-full md:w-48'>
+          <Form.Select
+            field='searchBindingStatus'
+            placeholder={t('第三方账户绑定状态')}
+            optionList={[
+              { label: t('已绑定'), value: 'bound' },
+              { label: t('未绑定'), value: 'unbound' },
+            ]}
+            onChange={() => {
               setTimeout(() => {
                 searchUsers(1, pageSize);
               }, 100);

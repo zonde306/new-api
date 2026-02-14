@@ -219,7 +219,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
-func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
+func SearchUsers(keyword string, group string, bindingStatus string, startIdx int, num int) ([]*User, int64, error) {
 	var users []*User
 	var total int64
 	var err error
@@ -262,6 +262,28 @@ func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, 
 			query = query.Where(likeCondition,
 				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 		}
+	}
+
+	// 第三方账户绑定状态过滤（不包含邮箱），支持：bound/unbound/1/0/true/false/已绑定/未绑定
+	// 使用子查询聚合各第三方来源（内置字段 + 自定义 OAuth 绑定表），降低多列 OR 条件对查询性能的影响
+	boundUserIDSubQuery := "SELECT id FROM users WHERE github_id IS NOT NULL AND github_id <> '' " +
+		"UNION SELECT id FROM users WHERE discord_id IS NOT NULL AND discord_id <> '' " +
+		"UNION SELECT id FROM users WHERE oidc_id IS NOT NULL AND oidc_id <> '' " +
+		"UNION SELECT id FROM users WHERE wechat_id IS NOT NULL AND wechat_id <> '' " +
+		"UNION SELECT id FROM users WHERE telegram_id IS NOT NULL AND telegram_id <> '' " +
+		"UNION SELECT id FROM users WHERE linux_do_id IS NOT NULL AND linux_do_id <> '' " +
+		"UNION SELECT user_id AS id FROM user_oauth_bindings"
+
+	bindingStatus = strings.TrimSpace(strings.ToLower(bindingStatus))
+	switch bindingStatus {
+	case "", "all":
+		// no-op
+	case "1", "true", "yes", "bound", "绑定", "已绑定":
+		query = query.Where("id IN (" + boundUserIDSubQuery + ")")
+	case "0", "false", "no", "unbound", "未绑定":
+		query = query.Where("id NOT IN (" + boundUserIDSubQuery + ")")
+	default:
+		// ignore invalid values
 	}
 
 	// 获取总数

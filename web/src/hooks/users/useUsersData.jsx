@@ -47,6 +47,7 @@ export const useUsersData = () => {
   const formInitValues = {
     searchKeyword: '',
     searchGroup: '',
+    searchBindingStatus: '',
   };
 
   // Form API reference
@@ -58,6 +59,7 @@ export const useUsersData = () => {
     return {
       searchKeyword: formValues.searchKeyword || '',
       searchGroup: formValues.searchGroup || '',
+      searchBindingStatus: formValues.searchBindingStatus || '',
     };
   };
 
@@ -91,23 +93,38 @@ export const useUsersData = () => {
     pageSize,
     searchKeyword = null,
     searchGroup = null,
+    searchBindingStatus = null,
   ) => {
     // If no parameters passed, get values from form
-    if (searchKeyword === null || searchGroup === null) {
+    if (
+      searchKeyword === null ||
+      searchGroup === null ||
+      searchBindingStatus === null
+    ) {
       const formValues = getFormValues();
       searchKeyword = formValues.searchKeyword;
       searchGroup = formValues.searchGroup;
+      searchBindingStatus = formValues.searchBindingStatus;
     }
 
-    if (searchKeyword === '' && searchGroup === '') {
-      // If keyword is blank, load files instead
+    if (
+      searchKeyword === '' &&
+      searchGroup === '' &&
+      searchBindingStatus === ''
+    ) {
+      // If filters are blank, load users instead
       await loadUsers(startIdx, pageSize);
       return;
     }
     setSearching(true);
-    const res = await API.get(
-      `/api/user/search?keyword=${searchKeyword}&group=${searchGroup}&p=${startIdx}&page_size=${pageSize}`,
-    );
+    const params = new URLSearchParams();
+    params.set('keyword', searchKeyword || '');
+    params.set('group', searchGroup || '');
+    params.set('binding_status', searchBindingStatus || '');
+    params.set('p', String(startIdx));
+    params.set('page_size', String(pageSize));
+
+    const res = await API.get(`/api/user/search?${params.toString()}`);
     const { success, message, data } = res.data;
     if (success) {
       const newPageData = data.items;
@@ -191,11 +208,11 @@ export const useUsersData = () => {
   // Handle page change
   const handlePageChange = (page) => {
     setActivePage(page);
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
+    const { searchKeyword, searchGroup, searchBindingStatus } = getFormValues();
+    if (searchKeyword === '' && searchGroup === '' && searchBindingStatus === '') {
       loadUsers(page, pageSize).then();
     } else {
-      searchUsers(page, pageSize, searchKeyword, searchGroup).then();
+      searchUsers(page, pageSize, searchKeyword, searchGroup, searchBindingStatus).then();
     }
   };
 
@@ -226,11 +243,17 @@ export const useUsersData = () => {
 
   // Refresh data
   const refresh = async (page = activePage) => {
-    const { searchKeyword, searchGroup } = getFormValues();
-    if (searchKeyword === '' && searchGroup === '') {
+    const { searchKeyword, searchGroup, searchBindingStatus } = getFormValues();
+    if (searchKeyword === '' && searchGroup === '' && searchBindingStatus === '') {
       await loadUsers(page, pageSize);
     } else {
-      await searchUsers(page, pageSize, searchKeyword, searchGroup);
+      await searchUsers(
+        page,
+        pageSize,
+        searchKeyword,
+        searchGroup,
+        searchBindingStatus,
+      );
     }
   };
 
