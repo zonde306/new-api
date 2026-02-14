@@ -16,8 +16,13 @@ var defNext = func(c *gin.Context) {
 	c.Next()
 }
 
+func newRateLimitRedisContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), common.RateLimitRedisOpTimeout)
+}
+
 func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark string) {
-	ctx := context.Background()
+	ctx, cancel := newRateLimitRedisContext()
+	defer cancel()
 	rdb := common.RDB
 	shard := common.HashShard(c.ClientIP(), common.RateLimitKeyShardCount)
 	key := fmt.Sprintf("rateLimit:global:%s:ip:%s:%s", mark, c.ClientIP(), shard)
@@ -127,7 +132,8 @@ func userRateLimitFactory(maxRequestNum int, duration int64, mark string) func(c
 // userRedisRateLimiter is like redisRateLimiter but accepts a pre-built key
 // (to support user-ID-based keys).
 func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key string) {
-	ctx := context.Background()
+	ctx, cancel := newRateLimitRedisContext()
+	defer cancel()
 	rdb := common.RDB
 	lim := limiter.New(ctx, rdb)
 	expireSeconds := int64(common.RateLimitKeyExpirationDuration.Seconds())

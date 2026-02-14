@@ -3,11 +3,30 @@
 -- ARGV[1]: 请求令牌数 (通常为1)
 -- ARGV[2]: 令牌生成速率 (每秒)
 -- ARGV[3]: 桶容量
+-- ARGV[4]: 过期时间（秒，可选；<=0 时自动按容量/速率推导）
 
 local key = KEYS[1]
 local requested = tonumber(ARGV[1])
 local rate = tonumber(ARGV[2])
 local capacity = tonumber(ARGV[3])
+local expire_seconds = tonumber(ARGV[4])
+
+if not requested or requested <= 0 then
+    return 1
+end
+if not rate or rate <= 0 then
+    return 1
+end
+if not capacity or capacity <= 0 then
+    return 1
+end
+
+if not expire_seconds or expire_seconds <= 0 then
+    expire_seconds = math.ceil(capacity / rate) + 60
+    if expire_seconds < 60 then
+        expire_seconds = 60
+    end
+end
 
 -- 获取当前时间（Redis服务器时间）
 local now = redis.call('TIME')
@@ -37,8 +56,10 @@ if tokens >= requested then
     allowed = true
 end
 
----- 更新桶状态并设置过期时间
+-- 更新桶状态并设置过期时间
 redis.call('HMSET', key, 'tokens', tokens, 'last_time', last_time)
---redis.call('EXPIRE', key, math.ceil(capacity / rate) + 60) -- 适当延长过期时间
+if expire_seconds > 0 then
+    redis.call('EXPIRE', key, expire_seconds)
+end
 
 return allowed and 1 or 0

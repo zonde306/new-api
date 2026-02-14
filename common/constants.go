@@ -186,6 +186,8 @@ var (
 
 var RateLimitKeyExpirationDuration = 20 * time.Minute
 var RateLimitKeyShardCount = 1 // >1 时为限流 key 增加 shard 后缀，缓解单 key 热点
+var RateLimitRedisOpTimeout = 1500 * time.Millisecond
+var RedisPoolStatsLogInterval = time.Duration(0)
 
 const (
 	UserStatusEnabled  = 1 // don't use 0, 0 is the default value!

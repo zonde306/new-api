@@ -127,6 +127,25 @@ func InitEnv() {
 	CriticalRateLimitEnable = GetEnvOrDefaultBool("CRITICAL_RATE_LIMIT_ENABLE", true)
 	CriticalRateLimitNum = GetEnvOrDefault("CRITICAL_RATE_LIMIT", 20)
 	CriticalRateLimitDuration = int64(GetEnvOrDefault("CRITICAL_RATE_LIMIT_DURATION", 20*60))
+
+	RateLimitKeyShardCount = GetEnvOrDefault("RATE_LIMIT_KEY_SHARD_COUNT", RateLimitKeyShardCount)
+	if RateLimitKeyShardCount < 1 {
+		RateLimitKeyShardCount = 1
+	}
+	if RateLimitKeyShardCount > 1024 {
+		RateLimitKeyShardCount = 1024
+	}
+
+	RateLimitRedisOpTimeout = GetEnvOrDefaultDurationMS("RATE_LIMIT_REDIS_OP_TIMEOUT_MS", int(RateLimitRedisOpTimeout.Milliseconds()))
+	if RateLimitRedisOpTimeout < 50*time.Millisecond {
+		RateLimitRedisOpTimeout = 50 * time.Millisecond
+	}
+
+	RedisPoolStatsLogIntervalSeconds := GetEnvOrDefault("REDIS_POOL_STATS_LOG_INTERVAL_SECONDS", int(RedisPoolStatsLogInterval.Seconds()))
+	if RedisPoolStatsLogIntervalSeconds > 0 {
+		RedisPoolStatsLogInterval = time.Duration(RedisPoolStatsLogIntervalSeconds) * time.Second
+	}
+
 	initConstantEnv()
 }
 

@@ -101,7 +101,25 @@ func InitRedisClient() (err error) {
 		SysLog(fmt.Sprintf("Redis connected to %s", opt.Addr))
 		SysLog(fmt.Sprintf("Redis database: %d", opt.DB))
 	}
+	startRedisPoolStatsLogger()
 	return err
+}
+
+func startRedisPoolStatsLogger() {
+	if RDB == nil {
+		return
+	}
+	if RedisPoolStatsLogInterval <= 0 {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(RedisPoolStatsLogInterval)
+		defer ticker.Stop()
+		for range ticker.C {
+			stats := RDB.PoolStats()
+			SysLog(fmt.Sprintf("Redis pool stats: hits=%d misses=%d timeouts=%d total_conns=%d idle_conns=%d stale_conns=%d", stats.Hits, stats.Misses, stats.Timeouts, stats.TotalConns, stats.IdleConns, stats.StaleConns))
+		}
+	}()
 }
 
 func ParseRedisOption() *redis.Options {
