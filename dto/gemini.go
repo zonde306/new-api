@@ -452,6 +452,41 @@ type GeminiChatResponse struct {
 	UsageMetadata  GeminiUsageMetadata       `json:"usageMetadata"`
 }
 
+// UnmarshalJSON 兼容 Gemini 在安全拦截场景下返回 object/null 的 candidates 字段。
+// 某些情况下上游会返回非数组 candidates，若直接反序列化会报错并被误判为 500。
+func (r *GeminiChatResponse) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		CandidatesRaw  json.RawMessage           `json:"candidates"`
+		PromptFeedback *GeminiChatPromptFeedback `json:"promptFeedback,omitempty"`
+		UsageMetadata  GeminiUsageMetadata       `json:"usageMetadata"`
+	}
+
+	if err := common.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	r.PromptFeedback = aux.PromptFeedback
+	r.UsageMetadata = aux.UsageMetadata
+
+	if len(aux.CandidatesRaw) == 0 {
+		r.Candidates = nil
+		return nil
+	}
+
+	switch common.GetJsonType(aux.CandidatesRaw) {
+	case "array":
+		if err := common.Unmarshal(aux.CandidatesRaw, &r.Candidates); err != nil {
+			return err
+		}
+	case "object", "null":
+		r.Candidates = []GeminiChatCandidate{}
+	default:
+		r.Candidates = []GeminiChatCandidate{}
+	}
+
+	return nil
+}
+
 type GeminiUsageMetadata struct {
 	PromptTokenCount        int                         `json:"promptTokenCount"`
 	CandidatesTokenCount    int                         `json:"candidatesTokenCount"`
