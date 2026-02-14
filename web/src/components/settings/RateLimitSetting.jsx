@@ -32,6 +32,14 @@ const RateLimitSetting = () => {
     ModelRequestRateLimitSuccessCount: 1000,
     ModelRequestRateLimitDurationMinutes: 1,
     ModelRequestRateLimitGroup: '',
+    ModelRequestIPRateLimitEnabled: false,
+    ModelRequestIPRateLimitDurationMinutes: 1,
+    ModelRequestIPRateLimitUserCount: 0,
+    ModelRequestIPRateLimitUserSuccessCount: 0,
+    ModelRequestIPRateLimitGroupCount: 0,
+    ModelRequestIPRateLimitGroupSuccessCount: 0,
+    ModelRequestIPRateLimitTokenCount: 0,
+    ModelRequestIPRateLimitTokenSuccessCount: 0,
   });
 
   let [loading, setLoading] = useState(false);

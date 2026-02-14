@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -193,6 +194,43 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": err.Error(),
+			})
+			return
+		}
+	case "ModelRequestIPRateLimitDurationMinutes":
+		v, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "ModelRequestIPRateLimitDurationMinutes 必须是整数",
+			})
+			return
+		}
+		if v < 1 || v > math.MaxInt32 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "ModelRequestIPRateLimitDurationMinutes 必须在 1~2147483647 之间",
+			})
+			return
+		}
+	case "ModelRequestIPRateLimitUserCount",
+		"ModelRequestIPRateLimitUserSuccessCount",
+		"ModelRequestIPRateLimitGroupCount",
+		"ModelRequestIPRateLimitGroupSuccessCount",
+		"ModelRequestIPRateLimitTokenCount",
+		"ModelRequestIPRateLimitTokenSuccessCount":
+		v, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": option.Key + " 必须是整数",
+			})
+			return
+		}
+		if v < 0 || v > math.MaxInt32 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": option.Key + " 必须在 0~2147483647 之间",
 			})
 			return
 		}

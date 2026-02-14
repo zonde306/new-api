@@ -13,6 +13,17 @@ var ModelRequestRateLimitDurationMinutes = 1
 var ModelRequestRateLimitCount = 0
 var ModelRequestRateLimitSuccessCount = 1000
 var ModelRequestRateLimitGroup = map[string][2]int{}
+
+// 基于 IP 的模型请求速率限制扩展
+var ModelRequestIPRateLimitEnabled = false
+var ModelRequestIPRateLimitDurationMinutes = 1
+var ModelRequestIPRateLimitUserCount = 0
+var ModelRequestIPRateLimitUserSuccessCount = 0
+var ModelRequestIPRateLimitGroupCount = 0
+var ModelRequestIPRateLimitGroupSuccessCount = 0
+var ModelRequestIPRateLimitTokenCount = 0
+var ModelRequestIPRateLimitTokenSuccessCount = 0
+
 var ModelRequestRateLimitMutex sync.RWMutex
 
 func ModelRequestRateLimitGroup2JSONString() string {

@@ -39,6 +39,14 @@ export default function RequestRateLimit(props) {
     ModelRequestRateLimitSuccessCount: 1000,
     ModelRequestRateLimitDurationMinutes: 1,
     ModelRequestRateLimitGroup: '',
+    ModelRequestIPRateLimitEnabled: false,
+    ModelRequestIPRateLimitDurationMinutes: 1,
+    ModelRequestIPRateLimitUserCount: 0,
+    ModelRequestIPRateLimitUserSuccessCount: 0,
+    ModelRequestIPRateLimitGroupCount: 0,
+    ModelRequestIPRateLimitGroupSuccessCount: 0,
+    ModelRequestIPRateLimitTokenCount: 0,
+    ModelRequestIPRateLimitTokenSuccessCount: 0,
   });
   const refForm = useRef();
   const [inputsRow, setInputsRow] = useState(inputs);
@@ -229,6 +237,152 @@ export default function RequestRateLimit(props) {
                 />
               </Col>
             </Row>
+
+            <Row style={{ marginTop: 20 }}>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.Switch
+                  field={'ModelRequestIPRateLimitEnabled'}
+                  label={t('启用基于IP的模型请求速率限制')}
+                  size='default'
+                  checkedText='｜'
+                  uncheckedText='〇'
+                  extraText={t('请勿过度信任此功能，IP可能被伪造，请配合nginx和cdn等网关使用')}
+                  onChange={(value) => {
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitEnabled: value,
+                    });
+                  }}
+                />
+              </Col>
+            </Row>
+            <Row>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('IP限制周期')}
+                  step={1}
+                  min={1}
+                  suffix={t('分钟')}
+                  extraText={t('基于IP的频率限制周期（分钟）')}
+                  field={'ModelRequestIPRateLimitDurationMinutes'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitDurationMinutes: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('用户+IP 每周期最多请求次数')}
+                  step={1}
+                  min={0}
+                  max={100000000}
+                  suffix={t('次')}
+                  extraText={t('包括失败请求的次数，0代表不限制')}
+                  field={'ModelRequestIPRateLimitUserCount'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitUserCount: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('用户+IP 每周期最多请求完成次数')}
+                  step={1}
+                  min={0}
+                  max={100000000}
+                  suffix={t('次')}
+                  extraText={t('只包括请求成功的次数，0代表不限制')}
+                  field={'ModelRequestIPRateLimitUserSuccessCount'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitUserSuccessCount: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('分组+IP 每周期最多请求次数')}
+                  step={1}
+                  min={0}
+                  max={100000000}
+                  suffix={t('次')}
+                  extraText={t('包括失败请求的次数，0代表不限制')}
+                  field={'ModelRequestIPRateLimitGroupCount'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitGroupCount: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('分组+IP 每周期最多请求完成次数')}
+                  step={1}
+                  min={0}
+                  max={100000000}
+                  suffix={t('次')}
+                  extraText={t('只包括请求成功的次数，0代表不限制')}
+                  field={'ModelRequestIPRateLimitGroupSuccessCount'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitGroupSuccessCount: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+            <Row>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('令牌+IP 每周期最多请求次数')}
+                  step={1}
+                  min={0}
+                  max={100000000}
+                  suffix={t('次')}
+                  extraText={t('包括失败请求的次数，0代表不限制')}
+                  field={'ModelRequestIPRateLimitTokenCount'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitTokenCount: String(value),
+                    })
+                  }
+                />
+              </Col>
+              <Col xs={24} sm={12} md={8} lg={8} xl={8}>
+                <Form.InputNumber
+                  label={t('令牌+IP 每周期最多请求完成次数')}
+                  step={1}
+                  min={0}
+                  max={100000000}
+                  suffix={t('次')}
+                  extraText={t('只包括请求成功的次数，0代表不限制')}
+                  field={'ModelRequestIPRateLimitTokenSuccessCount'}
+                  onChange={(value) =>
+                    setInputs({
+                      ...inputs,
+                      ModelRequestIPRateLimitTokenSuccessCount: String(value),
+                    })
+                  }
+                />
+              </Col>
+            </Row>
+
             <Row>
               <Button size='default' onClick={onSubmit}>
                 {t('保存模型速率限制')}

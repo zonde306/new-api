@@ -11,18 +11,18 @@ const (
 	ContextKeyRequestStartTime ContextKey = "request_start_time"
 
 	/* token related keys */
-	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"
-	ContextKeyTokenKey               ContextKey = "token_key"
-	ContextKeyTokenId                ContextKey = "token_id"
-	ContextKeyTokenGroup             ContextKey = "token_group"
-	ContextKeyTokenSpecificChannelId ContextKey = "specific_channel_id"
-	ContextKeyTokenModelLimitEnabled      ContextKey = "token_model_limit_enabled"
-	ContextKeyTokenModelLimit             ContextKey = "token_model_limit"
-	ContextKeyTokenCrossGroupRetry        ContextKey = "token_cross_group_retry"
-	ContextKeyTokenRateLimitEnabled       ContextKey = "token_rate_limit_enabled"
-	ContextKeyTokenRateLimitDurationMins  ContextKey = "token_rate_limit_duration_minutes"
-	ContextKeyTokenRateLimitCount         ContextKey = "token_rate_limit_count"
-	ContextKeyTokenRateLimitSuccessCount  ContextKey = "token_rate_limit_success_count"
+	ContextKeyTokenUnlimited             ContextKey = "token_unlimited_quota"
+	ContextKeyTokenKey                   ContextKey = "token_key"
+	ContextKeyTokenId                    ContextKey = "token_id"
+	ContextKeyTokenGroup                 ContextKey = "token_group"
+	ContextKeyTokenSpecificChannelId     ContextKey = "specific_channel_id"
+	ContextKeyTokenModelLimitEnabled     ContextKey = "token_model_limit_enabled"
+	ContextKeyTokenModelLimit            ContextKey = "token_model_limit"
+	ContextKeyTokenCrossGroupRetry       ContextKey = "token_cross_group_retry"
+	ContextKeyTokenRateLimitEnabled      ContextKey = "token_rate_limit_enabled"
+	ContextKeyTokenRateLimitDurationMins ContextKey = "token_rate_limit_duration_minutes"
+	ContextKeyTokenRateLimitCount        ContextKey = "token_rate_limit_count"
+	ContextKeyTokenRateLimitSuccessCount ContextKey = "token_rate_limit_success_count"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"
@@ -55,6 +55,7 @@ const (
 	ContextKeyUserGroup   ContextKey = "user_group"
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
+	ContextKeyClientIP    ContextKey = "client_ip"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 

@@ -295,9 +295,16 @@ func TokenAuth() func(c *gin.Context) {
 			return
 		}
 
+		clientIp := c.ClientIP()
+		common.SetContextKey(c, constant.ContextKeyClientIP, clientIp)
+
 		allowIps := token.GetIpLimits()
 		if len(allowIps) > 0 {
-			clientIp := c.ClientIP()
+			clientIp := common.GetContextKeyString(c, constant.ContextKeyClientIP)
+			if clientIp == "" {
+				clientIp = c.ClientIP()
+				common.SetContextKey(c, constant.ContextKeyClientIP, clientIp)
+			}
 			logger.LogDebug(c, "Token has IP restrictions, checking client IP %s", clientIp)
 			ip := net.ParseIP(clientIp)
 			if ip == nil {
