@@ -331,24 +331,29 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 				})
 			}
 
-			// group + ip
+			// group + ip（按 JSON 分组配置）
 			if group != "" {
-				policies = appendPolicyIfHasLimit(policies, modelRateLimitPolicy{
-					Identifier:      fmt.Sprintf("ip:g:%s:%s", group, clientIp),
-					DurationMinutes: ipDurationMinutes,
-					TotalMaxCount:   setting.ModelRequestIPRateLimitGroupCount,
-					SuccessMaxCount: setting.ModelRequestIPRateLimitGroupSuccessCount,
-				})
+				groupTotalCount, groupSuccessCount, found := setting.GetIPGroupRateLimit(group)
+				if found {
+					policies = appendPolicyIfHasLimit(policies, modelRateLimitPolicy{
+						Identifier:      fmt.Sprintf("ip:g:%s:%s", group, clientIp),
+						DurationMinutes: ipDurationMinutes,
+						TotalMaxCount:   groupTotalCount,
+						SuccessMaxCount: groupSuccessCount,
+					})
+				}
 			}
 
-			// token + ip
+			// token + ip（按令牌配置）
 			tokenId := common.GetContextKeyInt(c, constant.ContextKeyTokenId)
+			tokenIPTotalMaxCount := common.GetContextKeyInt(c, constant.ContextKeyTokenIPRateLimitCount)
+			tokenIPSuccessMaxCount := common.GetContextKeyInt(c, constant.ContextKeyTokenIPRateLimitSuccessCount)
 			if tokenId > 0 {
 				policies = appendPolicyIfHasLimit(policies, modelRateLimitPolicy{
 					Identifier:      fmt.Sprintf("ip:t:%d:%s", tokenId, clientIp),
 					DurationMinutes: ipDurationMinutes,
-					TotalMaxCount:   setting.ModelRequestIPRateLimitTokenCount,
-					SuccessMaxCount: setting.ModelRequestIPRateLimitTokenSuccessCount,
+					TotalMaxCount:   tokenIPTotalMaxCount,
+					SuccessMaxCount: tokenIPSuccessMaxCount,
 				})
 			}
 		}

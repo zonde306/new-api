@@ -117,10 +117,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestIPRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestIPRateLimitDurationMinutes)
 	common.OptionMap["ModelRequestIPRateLimitUserCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitUserCount)
 	common.OptionMap["ModelRequestIPRateLimitUserSuccessCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitUserSuccessCount)
-	common.OptionMap["ModelRequestIPRateLimitGroupCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitGroupCount)
-	common.OptionMap["ModelRequestIPRateLimitGroupSuccessCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitGroupSuccessCount)
-	common.OptionMap["ModelRequestIPRateLimitTokenCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitTokenCount)
-	common.OptionMap["ModelRequestIPRateLimitTokenSuccessCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitTokenSuccessCount)
+	common.OptionMap["ModelRequestIPRateLimitGroup"] = setting.ModelRequestIPRateLimitGroup2JSONString()
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
@@ -427,14 +424,8 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.ModelRequestIPRateLimitUserCount, _ = strconv.Atoi(value)
 	case "ModelRequestIPRateLimitUserSuccessCount":
 		setting.ModelRequestIPRateLimitUserSuccessCount, _ = strconv.Atoi(value)
-	case "ModelRequestIPRateLimitGroupCount":
-		setting.ModelRequestIPRateLimitGroupCount, _ = strconv.Atoi(value)
-	case "ModelRequestIPRateLimitGroupSuccessCount":
-		setting.ModelRequestIPRateLimitGroupSuccessCount, _ = strconv.Atoi(value)
-	case "ModelRequestIPRateLimitTokenCount":
-		setting.ModelRequestIPRateLimitTokenCount, _ = strconv.Atoi(value)
-	case "ModelRequestIPRateLimitTokenSuccessCount":
-		setting.ModelRequestIPRateLimitTokenSuccessCount, _ = strconv.Atoi(value)
+	case "ModelRequestIPRateLimitGroup":
+		err = setting.UpdateModelRequestIPRateLimitGroupByJSONString(value)
 	case "RetryTimes":
 		common.RetryTimes, _ = strconv.Atoi(value)
 	case "DataExportInterval":

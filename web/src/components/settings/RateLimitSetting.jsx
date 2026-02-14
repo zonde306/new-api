@@ -36,10 +36,7 @@ const RateLimitSetting = () => {
     ModelRequestIPRateLimitDurationMinutes: 1,
     ModelRequestIPRateLimitUserCount: 0,
     ModelRequestIPRateLimitUserSuccessCount: 0,
-    ModelRequestIPRateLimitGroupCount: 0,
-    ModelRequestIPRateLimitGroupSuccessCount: 0,
-    ModelRequestIPRateLimitTokenCount: 0,
-    ModelRequestIPRateLimitTokenSuccessCount: 0,
+    ModelRequestIPRateLimitGroup: '',
   });
 
   let [loading, setLoading] = useState(false);
@@ -50,7 +47,10 @@ const RateLimitSetting = () => {
     if (success) {
       let newInputs = {};
       data.forEach((item) => {
-        if (item.key === 'ModelRequestRateLimitGroup') {
+        if (
+          item.key === 'ModelRequestRateLimitGroup' ||
+          item.key === 'ModelRequestIPRateLimitGroup'
+        ) {
           item.value = JSON.stringify(JSON.parse(item.value), null, 2);
         }
 

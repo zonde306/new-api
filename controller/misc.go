@@ -123,6 +123,8 @@ func GetStatus(c *gin.Context) {
 		"user_agreement_enabled":      legalSetting.UserAgreement != "",
 		"privacy_policy_enabled":      legalSetting.PrivacyPolicy != "",
 		"checkin_enabled":             operation_setting.GetCheckinSetting().Enabled,
+		"model_request_rate_limit_enabled": setting.ModelRequestRateLimitEnabled,
+		"model_request_ip_rate_limit_enabled": setting.ModelRequestIPRateLimitEnabled,
 		"_qn":                         "new-api",
 	}
 

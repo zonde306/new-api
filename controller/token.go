@@ -16,6 +16,12 @@ import (
 )
 
 func validateTokenRateLimit(token *model.Token) error {
+	if token.IPRateLimitCount < 0 {
+		return errors.New("令牌+IP 总请求数限制不能为负数")
+	}
+	if token.IPRateLimitSuccessCount < 0 {
+		return errors.New("令牌+IP 成功请求数限制不能为负数")
+	}
 	if !token.RateLimitEnabled {
 		return nil
 	}
@@ -202,14 +208,14 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	cleanToken := model.Token{
-		UserId:             c.GetInt("id"),
-		Name:               token.Name,
-		Key:                key,
-		CreatedTime:        common.GetTimestamp(),
-		AccessedTime:       common.GetTimestamp(),
-		ExpiredTime:        token.ExpiredTime,
-		RemainQuota:        token.RemainQuota,
-		UnlimitedQuota:     token.UnlimitedQuota,
+		UserId:                  c.GetInt("id"),
+		Name:                    token.Name,
+		Key:                     key,
+		CreatedTime:             common.GetTimestamp(),
+		AccessedTime:            common.GetTimestamp(),
+		ExpiredTime:             token.ExpiredTime,
+		RemainQuota:             token.RemainQuota,
+		UnlimitedQuota:          token.UnlimitedQuota,
 		ModelLimitsEnabled:      token.ModelLimitsEnabled,
 		ModelLimits:             token.ModelLimits,
 		AllowIps:                token.AllowIps,
@@ -217,6 +223,8 @@ func AddToken(c *gin.Context) {
 		RateLimitDurationMinute: token.RateLimitDurationMinute,
 		RateLimitCount:          token.RateLimitCount,
 		RateLimitSuccessCount:   token.RateLimitSuccessCount,
+		IPRateLimitCount:        token.IPRateLimitCount,
+		IPRateLimitSuccessCount: token.IPRateLimitSuccessCount,
 		Group:                   token.Group,
 		CrossGroupRetry:         token.CrossGroupRetry,
 	}
@@ -305,6 +313,8 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.RateLimitDurationMinute = token.RateLimitDurationMinute
 		cleanToken.RateLimitCount = token.RateLimitCount
 		cleanToken.RateLimitSuccessCount = token.RateLimitSuccessCount
+		cleanToken.IPRateLimitCount = token.IPRateLimitCount
+		cleanToken.IPRateLimitSuccessCount = token.IPRateLimitSuccessCount
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 	}

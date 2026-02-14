@@ -214,11 +214,7 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	case "ModelRequestIPRateLimitUserCount",
-		"ModelRequestIPRateLimitUserSuccessCount",
-		"ModelRequestIPRateLimitGroupCount",
-		"ModelRequestIPRateLimitGroupSuccessCount",
-		"ModelRequestIPRateLimitTokenCount",
-		"ModelRequestIPRateLimitTokenSuccessCount":
+		"ModelRequestIPRateLimitUserSuccessCount":
 		v, parseErr := strconv.Atoi(option.Value.(string))
 		if parseErr != nil {
 			c.JSON(http.StatusOK, gin.H{
@@ -231,6 +227,15 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": option.Key + " 必须在 0~2147483647 之间",
+			})
+			return
+		}
+	case "ModelRequestIPRateLimitGroup":
+		err = setting.CheckModelRequestIPRateLimitGroup(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
 			})
 			return
 		}

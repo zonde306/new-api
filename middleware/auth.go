@@ -382,6 +382,8 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	common.SetContextKey(c, constant.ContextKeyTokenRateLimitDurationMins, token.RateLimitDurationMinute)
 	common.SetContextKey(c, constant.ContextKeyTokenRateLimitCount, token.RateLimitCount)
 	common.SetContextKey(c, constant.ContextKeyTokenRateLimitSuccessCount, token.RateLimitSuccessCount)
+	common.SetContextKey(c, constant.ContextKeyTokenIPRateLimitCount, token.IPRateLimitCount)
+	common.SetContextKey(c, constant.ContextKeyTokenIPRateLimitSuccessCount, token.IPRateLimitSuccessCount)
 	if len(parts) > 1 {
 		if model.IsAdmin(token.UserId) {
 			c.Set("specific_channel_id", parts[1])
