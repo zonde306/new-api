@@ -37,6 +37,10 @@ var (
 	channelAffinityUsageCacheStatsCache *cachex.HybridCache[ChannelAffinityUsageCacheCounters]
 
 	channelAffinityRegexCache sync.Map // map[string]*regexp.Regexp
+
+	routingCacheRedisOpTimeout   = common.GetEnvOrDefaultDurationMS("ROUTING_CACHE_REDIS_OP_TIMEOUT_MS", 2000)
+	routingCacheRedisScanTimeout = common.GetEnvOrDefaultDurationMS("ROUTING_CACHE_REDIS_SCAN_TIMEOUT_MS", 30000)
+	routingCacheRedisDelTimeout  = common.GetEnvOrDefaultDurationMS("ROUTING_CACHE_REDIS_DEL_TIMEOUT_MS", 10000)
 )
 
 type channelAffinityMeta struct {
@@ -88,7 +92,10 @@ func getChannelAffinityCache() *cachex.HybridCache[int] {
 			RedisEnabled: func() bool {
 				return common.RedisEnabled && common.RDB != nil
 			},
-			RedisCodec: cachex.IntCodec{},
+			RedisCodec:       cachex.IntCodec{},
+			RedisOpTimeout:   routingCacheRedisOpTimeout,
+			RedisScanTimeout: routingCacheRedisScanTimeout,
+			RedisDelTimeout:  routingCacheRedisDelTimeout,
 			Memory: func() *hot.HotCache[string, int] {
 				return hot.NewHotCache[string, int](hot.LRU, capacity).
 					WithTTL(time.Duration(defaultTTLSeconds) * time.Second).
@@ -767,7 +774,10 @@ func getChannelAffinityUsageCacheStatsCache() *cachex.HybridCache[ChannelAffinit
 			RedisEnabled: func() bool {
 				return common.RedisEnabled && common.RDB != nil
 			},
-			RedisCodec: cachex.JSONCodec[ChannelAffinityUsageCacheCounters]{},
+			RedisCodec:       cachex.JSONCodec[ChannelAffinityUsageCacheCounters]{},
+			RedisOpTimeout:   routingCacheRedisOpTimeout,
+			RedisScanTimeout: routingCacheRedisScanTimeout,
+			RedisDelTimeout:  routingCacheRedisDelTimeout,
 			Memory: func() *hot.HotCache[string, ChannelAffinityUsageCacheCounters] {
 				return hot.NewHotCache[string, ChannelAffinityUsageCacheCounters](hot.LRU, capacity).
 					WithTTL(time.Duration(defaultTTLSeconds) * time.Second).

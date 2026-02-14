@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 func GetEnvOrDefault(env string, defaultValue int) int {
@@ -35,4 +36,14 @@ func GetEnvOrDefaultBool(env string, defaultValue bool) bool {
 		return defaultValue
 	}
 	return b
+}
+
+// GetEnvOrDefaultDurationMS reads milliseconds from env and converts it to time.Duration.
+// If the env value is <= 0, it falls back to defaultMs.
+func GetEnvOrDefaultDurationMS(env string, defaultMs int) time.Duration {
+	ms := GetEnvOrDefault(env, defaultMs)
+	if ms <= 0 {
+		ms = defaultMs
+	}
+	return time.Duration(ms) * time.Millisecond
 }

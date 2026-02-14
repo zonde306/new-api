@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -65,6 +66,12 @@ type ChannelInfo struct {
 	MultiKeyDisabledTime   map[int]int64         `json:"multi_key_disabled_time,omitempty"`   // key禁用时间列表，key index -> time
 	MultiKeyPollingIndex   int                   `json:"multi_key_polling_index"`             // 多Key模式下轮询的key索引
 	MultiKeyMode           constant.MultiKeyMode `json:"multi_key_mode"`
+}
+
+var routingDBQueryTimeout = common.GetEnvOrDefaultDurationMS("ROUTING_DB_QUERY_TIMEOUT_MS", 1200)
+
+func getRoutingDBContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), routingDBQueryTimeout)
 }
 
 // Value implements driver.Valuer interface
@@ -340,7 +347,7 @@ func SearchChannels(keyword string, group string, model string, idSort bool) ([]
 
 func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	channel := &Channel{Id: id}
-	var err error = nil
+	var err error
 	if selectAll {
 		err = DB.First(channel, "id = ?", id).Error
 	} else {

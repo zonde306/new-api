@@ -25,6 +25,16 @@ type HybridCacheConfig[V any] struct {
 	RedisCodec   ValueCodec[V]
 	RedisEnabled func() bool
 
+	// RedisOpTimeout controls single-key redis operations like GET/SET.
+	// If <= 0, defaultRedisOpTimeout is used.
+	RedisOpTimeout time.Duration
+	// RedisScanTimeout controls SCAN based operations like Keys/DeleteByPrefix.
+	// If <= 0, defaultRedisScanTimeout is used.
+	RedisScanTimeout time.Duration
+	// RedisDelTimeout controls pipeline delete operations.
+	// If <= 0, defaultRedisDelTimeout is used.
+	RedisDelTimeout time.Duration
+
 	// Memory builds a hot cache used when Redis is disabled. Keys stored in memory are fully namespaced.
 	Memory func() *hot.HotCache[string, V]
 }
@@ -37,18 +47,37 @@ type HybridCache[V any] struct {
 	redisCodec   ValueCodec[V]
 	redisEnabled func() bool
 
+	redisOpTimeout   time.Duration
+	redisScanTimeout time.Duration
+	redisDelTimeout  time.Duration
+
 	memOnce sync.Once
 	memInit func() *hot.HotCache[string, V]
 	mem     *hot.HotCache[string, V]
 }
 
 func NewHybridCache[V any](cfg HybridCacheConfig[V]) *HybridCache[V] {
+	opTimeout := cfg.RedisOpTimeout
+	if opTimeout <= 0 {
+		opTimeout = defaultRedisOpTimeout
+	}
+	scanTimeout := cfg.RedisScanTimeout
+	if scanTimeout <= 0 {
+		scanTimeout = defaultRedisScanTimeout
+	}
+	delTimeout := cfg.RedisDelTimeout
+	if delTimeout <= 0 {
+		delTimeout = defaultRedisDelTimeout
+	}
 	return &HybridCache[V]{
-		ns:           cfg.Namespace,
-		redis:        cfg.Redis,
-		redisCodec:   cfg.RedisCodec,
-		redisEnabled: cfg.RedisEnabled,
-		memInit:      cfg.Memory,
+		ns:               cfg.Namespace,
+		redis:            cfg.Redis,
+		redisCodec:       cfg.RedisCodec,
+		redisEnabled:     cfg.RedisEnabled,
+		redisOpTimeout:   opTimeout,
+		redisScanTimeout: scanTimeout,
+		redisDelTimeout:  delTimeout,
+		memInit:          cfg.Memory,
 	}
 }
 
@@ -85,7 +114,7 @@ func (c *HybridCache[V]) Get(key string) (value V, found bool, err error) {
 	}
 
 	if c.redisOn() {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisOpTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), c.redisOpTimeout)
 		defer cancel()
 
 		raw, e := c.redis.Get(ctx, full).Result()
@@ -119,7 +148,7 @@ func (c *HybridCache[V]) SetWithTTL(key string, v V, ttl time.Duration) error {
 		if err != nil {
 			return err
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisOpTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), c.redisOpTimeout)
 		defer cancel()
 		return c.redis.Set(ctx, full, raw, ttl).Err()
 	}
@@ -137,7 +166,7 @@ func (c *HybridCache[V]) Keys() ([]string, error) {
 }
 
 func (c *HybridCache[V]) scanKeys(match string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), defaultRedisScanTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), c.redisScanTimeout)
 	defer cancel()
 
 	var cursor uint64
@@ -247,7 +276,7 @@ func (c *HybridCache[V]) DeleteMany(keys []string) (map[string]bool, error) {
 	}
 
 	if c.redisOn() {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisDelTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), c.redisDelTimeout)
 		defer cancel()
 
 		pipe := c.redis.Pipeline()
