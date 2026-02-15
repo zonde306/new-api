@@ -37,18 +37,15 @@ func SubscriptionRequestWalletPay(c *gin.Context) {
 		common.ApiErrorMsg(c, "套餐金额不合法")
 		return
 	}
+	if !plan.AllowWalletPay {
+		common.ApiErrorMsg(c, "该套餐不支持余额支付")
+		return
+	}
 
 	userId := c.GetInt("id")
-	if plan.MaxPurchasePerUser > 0 {
-		count, err := model.CountUserSubscriptionsByPlan(userId, plan.Id)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		if count >= int64(plan.MaxPurchasePerUser) {
-			common.ApiErrorMsg(c, "已达到该套餐购买上限")
-			return
-		}
+	if err := model.CheckSubscriptionPurchaseEligibility(userId, plan); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
 	}
 
 	quotaCost, displayAmount, displayRate := calcSubscriptionWalletQuota(plan)

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,6 +166,15 @@ type SubscriptionPlan struct {
 	// Max purchases per user (0 = unlimited)
 	MaxPurchasePerUser int `json:"max_purchase_per_user" gorm:"type:int;default:0"`
 
+	// Exclusive plan IDs (comma-separated), cannot be active together
+	ExclusivePlanIds string `json:"exclusive_plan_ids" gorm:"type:text;default:''"`
+
+	// Disallow stacking same plan while current one is still active
+	DisallowStack bool `json:"disallow_stack" gorm:"default:false"`
+
+	// Allow paying this plan with wallet balance
+	AllowWalletPay bool `json:"allow_wallet_pay" gorm:"default:true"`
+
 	// Upgrade user group after purchase (empty = no change)
 	UpgradeGroup string `json:"upgrade_group" gorm:"type:varchar(64);default:''"`
 
@@ -305,6 +315,47 @@ func NormalizeResetPeriod(period string) string {
 	}
 }
 
+func ParsePlanIDList(raw string) ([]int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []int{}, nil
+	}
+	parts := strings.Split(raw, ",")
+	ids := make([]int, 0, len(parts))
+	seen := make(map[int]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := strconv.Atoi(part)
+		if err != nil || id <= 0 {
+			return nil, errors.New("互斥套餐ID列表格式不正确")
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids, nil
+}
+
+func FormatPlanIDList(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		parts = append(parts, strconv.Itoa(id))
+	}
+	return strings.Join(parts, ",")
+}
+
 func calcNextResetTime(base time.Time, plan *SubscriptionPlan, endUnix int64) int64 {
 	if plan == nil {
 		return 0
@@ -385,6 +436,61 @@ func CountUserSubscriptionsByPlan(userId int, planId int) (int64, error) {
 	return count, nil
 }
 
+func CheckSubscriptionPurchaseEligibility(userId int, plan *SubscriptionPlan) error {
+	return CheckSubscriptionPurchaseEligibilityTx(nil, userId, plan)
+}
+
+func CheckSubscriptionPurchaseEligibilityTx(tx *gorm.DB, userId int, plan *SubscriptionPlan) error {
+	if userId <= 0 {
+		return errors.New("invalid user id")
+	}
+	if plan == nil || plan.Id <= 0 {
+		return errors.New("invalid plan")
+	}
+	if tx == nil {
+		tx = DB
+	}
+	if plan.MaxPurchasePerUser > 0 {
+		var count int64
+		if err := tx.Model(&UserSubscription{}).
+			Where("user_id = ? AND plan_id = ?", userId, plan.Id).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= int64(plan.MaxPurchasePerUser) {
+			return errors.New("已达到该套餐购买上限")
+		}
+	}
+	now := GetDBTimestamp()
+	if plan.DisallowStack {
+		var activeCount int64
+		if err := tx.Model(&UserSubscription{}).
+			Where("user_id = ? AND plan_id = ? AND status = ? AND end_time > ?", userId, plan.Id, "active", now).
+			Count(&activeCount).Error; err != nil {
+			return err
+		}
+		if activeCount > 0 {
+			return errors.New("该套餐禁止叠加，请在当前套餐失效后再购买")
+		}
+	}
+	if ids, err := ParsePlanIDList(plan.ExclusivePlanIds); err != nil {
+		return err
+	} else if len(ids) > 0 {
+		var conflict UserSubscription
+		query := tx.Where("user_id = ? AND plan_id IN ? AND status = ? AND end_time > ?", userId, ids, "active", now).
+			Order("end_time desc, id desc").
+			Limit(1).
+			Find(&conflict)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected > 0 {
+			return fmt.Errorf("存在互斥生效套餐（ID: %d），暂不可购买", conflict.PlanId)
+		}
+	}
+	return nil
+}
+
 func getUserGroupByIdTx(tx *gorm.DB, userId int) (string, error) {
 	if userId <= 0 {
 		return "", errors.New("invalid userId")
@@ -444,16 +550,8 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 	if userId <= 0 {
 		return nil, errors.New("invalid user id")
 	}
-	if plan.MaxPurchasePerUser > 0 {
-		var count int64
-		if err := tx.Model(&UserSubscription{}).
-			Where("user_id = ? AND plan_id = ?", userId, plan.Id).
-			Count(&count).Error; err != nil {
-			return nil, err
-		}
-		if count >= int64(plan.MaxPurchasePerUser) {
-			return nil, errors.New("已达到该套餐购买上限")
-		}
+	if err := CheckSubscriptionPurchaseEligibilityTx(tx, userId, plan); err != nil {
+		return nil, err
 	}
 	nowUnix := GetDBTimestamp()
 	now := time.Unix(nowUnix, 0)

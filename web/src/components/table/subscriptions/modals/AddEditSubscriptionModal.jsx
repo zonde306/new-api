@@ -93,6 +93,9 @@ const AddEditSubscriptionModal = ({
     enabled: true,
     sort_order: 0,
     max_purchase_per_user: 0,
+    exclusive_plan_ids: '',
+    disallow_stack: false,
+    allow_wallet_pay: true,
     total_amount: 0,
     upgrade_group: '',
     stripe_price_id: '',
@@ -103,27 +106,30 @@ const AddEditSubscriptionModal = ({
     const base = getInitValues();
     if (editingPlan?.plan?.id === undefined) return base;
     const p = editingPlan.plan || {};
-    return {
-      ...base,
-      title: p.title || '',
-      subtitle: p.subtitle || '',
-      price_amount: Number(p.price_amount || 0),
-      currency: 'USD',
-      duration_unit: p.duration_unit || 'month',
-      duration_value: Number(p.duration_value || 1),
-      custom_seconds: Number(p.custom_seconds || 0),
-      quota_reset_period: p.quota_reset_period || 'never',
-      quota_reset_custom_seconds: Number(p.quota_reset_custom_seconds || 0),
-      enabled: p.enabled !== false,
-      sort_order: Number(p.sort_order || 0),
-      max_purchase_per_user: Number(p.max_purchase_per_user || 0),
-      total_amount: Number(
-        quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
-      ),
-      upgrade_group: p.upgrade_group || '',
-      stripe_price_id: p.stripe_price_id || '',
-      creem_product_id: p.creem_product_id || '',
-    };
+      return {
+        ...base,
+        title: p.title || '',
+        subtitle: p.subtitle || '',
+        price_amount: Number(p.price_amount || 0),
+        currency: 'USD',
+        duration_unit: p.duration_unit || 'month',
+        duration_value: Number(p.duration_value || 1),
+        custom_seconds: Number(p.custom_seconds || 0),
+        quota_reset_period: p.quota_reset_period || 'never',
+        quota_reset_custom_seconds: Number(p.quota_reset_custom_seconds || 0),
+        enabled: p.enabled !== false,
+        sort_order: Number(p.sort_order || 0),
+        max_purchase_per_user: Number(p.max_purchase_per_user || 0),
+        exclusive_plan_ids: p.exclusive_plan_ids || '',
+        disallow_stack: p.disallow_stack === true,
+        allow_wallet_pay: p.allow_wallet_pay !== false,
+        total_amount: Number(
+          quotaToDisplayAmount(p.total_amount || 0).toFixed(2),
+        ),
+        upgrade_group: p.upgrade_group || '',
+        stripe_price_id: p.stripe_price_id || '',
+        creem_product_id: p.creem_product_id || '',
+      };
   };
 
   useEffect(() => {
@@ -164,6 +170,9 @@ const AddEditSubscriptionModal = ({
           max_purchase_per_user: Number(values.max_purchase_per_user || 0),
           total_amount: displayAmountToQuota(values.total_amount),
           upgrade_group: values.upgrade_group || '',
+          exclusive_plan_ids: values.exclusive_plan_ids || '',
+          disallow_stack: values.disallow_stack === true,
+          allow_wallet_pay: values.allow_wallet_pay !== false,
         },
       };
       if (editingPlan?.plan?.id) {
@@ -360,24 +369,52 @@ const AddEditSubscriptionModal = ({
                       />
                     </Col>
 
-                    <Col span={12}>
-                      <Form.InputNumber
-                        field='max_purchase_per_user'
-                        label={t('购买上限')}
-                        min={0}
-                        precision={0}
-                        extraText={t('0 表示不限')}
-                        style={{ width: '100%' }}
-                      />
-                    </Col>
-
-                    <Col span={12}>
-                      <Form.Switch
-                        field='enabled'
-                        label={t('启用状态')}
-                        size='large'
-                      />
-                    </Col>
+                     <Col span={12}>
+                       <Form.InputNumber
+                         field='max_purchase_per_user'
+                         label={t('购买上限')}
+                         min={0}
+                         precision={0}
+                         extraText={t('0 表示不限')}
+                         style={{ width: '100%' }}
+                       />
+                     </Col>
+ 
+                     <Col span={12}>
+                       <Form.Input
+                         field='exclusive_plan_ids'
+                         label={t('互斥限制')}
+                         placeholder={t('填入套餐ID列表，用逗号分隔，例如：1,2,3')}
+                         extraText={t('不允许与列表内套餐同时激活（生效中）')}
+                         showClear
+                       />
+                     </Col>
+ 
+                     <Col span={12}>
+                       <Form.Switch
+                         field='disallow_stack'
+                         label={t('禁止叠加')}
+                         size='large'
+                         extraText={t('开启后：每次只能购买同一个套餐一次，需等上一个失效后才能再次购买')}
+                       />
+                     </Col>
+ 
+                     <Col span={12}>
+                       <Form.Switch
+                         field='allow_wallet_pay'
+                         label={t('允许余额支付')}
+                         size='large'
+                         extraText={t('关闭后：用户端不显示余额支付入口，接口也会拒绝余额支付')}
+                       />
+                     </Col>
+ 
+                     <Col span={12}>
+                       <Form.Switch
+                         field='enabled'
+                         label={t('启用状态')}
+                         size='large'
+                       />
+                     </Col>
                   </Row>
                 </Card>
 

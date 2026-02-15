@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
 	"gorm.io/gorm"
 )
 
@@ -107,9 +109,45 @@ type AdminUpsertSubscriptionPlanRequest struct {
 	Plan model.SubscriptionPlan `json:"plan"`
 }
 
+type AdminUpsertSubscriptionPlanRawRequest struct {
+	Plan struct {
+		AllowWalletPay   *bool   `json:"allow_wallet_pay"`
+		DisallowStack    *bool   `json:"disallow_stack"`
+		ExclusivePlanIds *string `json:"exclusive_plan_ids"`
+	} `json:"plan"`
+}
+
+func normalizeExclusivePlanIds(raw string, currentPlanId int) (string, error) {
+	ids, err := model.ParsePlanIDList(raw)
+	if err != nil {
+		return "", err
+	}
+	if len(ids) == 0 {
+		return "", nil
+	}
+	for _, id := range ids {
+		if currentPlanId > 0 && id == currentPlanId {
+			return "", errors.New("互斥套餐不能包含自身")
+		}
+	}
+	var count int64
+	if err := model.DB.Model(&model.SubscriptionPlan{}).Where("id IN ?", ids).Count(&count).Error; err != nil {
+		return "", err
+	}
+	if count != int64(len(ids)) {
+		return "", errors.New("互斥套餐ID包含不存在的套餐")
+	}
+	return model.FormatPlanIDList(ids), nil
+}
+
 func AdminCreateSubscriptionPlan(c *gin.Context) {
 	var req AdminUpsertSubscriptionPlanRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	var rawReq AdminUpsertSubscriptionPlanRawRequest
+	if err := c.ShouldBindBodyWith(&rawReq, binding.JSON); err != nil {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
@@ -156,8 +194,24 @@ func AdminCreateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "自定义重置周期需大于0秒")
 		return
 	}
-	err := model.DB.Create(&req.Plan).Error
+	if rawReq.Plan.AllowWalletPay == nil {
+		req.Plan.AllowWalletPay = true
+	} else {
+		req.Plan.AllowWalletPay = *rawReq.Plan.AllowWalletPay
+	}
+	if rawReq.Plan.DisallowStack == nil {
+		req.Plan.DisallowStack = false
+	} else {
+		req.Plan.DisallowStack = *rawReq.Plan.DisallowStack
+	}
+	normalizedExclusive, err := normalizeExclusivePlanIds(req.Plan.ExclusivePlanIds, 0)
 	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	req.Plan.ExclusivePlanIds = normalizedExclusive
+
+	if err := model.DB.Create(&req.Plan).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -171,11 +225,23 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		common.ApiErrorMsg(c, "无效的ID")
 		return
 	}
+	currentPlan, err := model.GetSubscriptionPlanById(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
 	var req AdminUpsertSubscriptionPlanRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindBodyWith(&req, binding.JSON); err != nil {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
+	var rawReq AdminUpsertSubscriptionPlanRawRequest
+	if err := c.ShouldBindBodyWith(&rawReq, binding.JSON); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+
 	if strings.TrimSpace(req.Plan.Title) == "" {
 		common.ApiErrorMsg(c, "套餐标题不能为空")
 		return
@@ -220,7 +286,25 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 		return
 	}
 
-	err := model.DB.Transaction(func(tx *gorm.DB) error {
+	allowWalletPay := currentPlan.AllowWalletPay
+	if rawReq.Plan.AllowWalletPay != nil {
+		allowWalletPay = *rawReq.Plan.AllowWalletPay
+	}
+	disallowStack := currentPlan.DisallowStack
+	if rawReq.Plan.DisallowStack != nil {
+		disallowStack = *rawReq.Plan.DisallowStack
+	}
+	exclusiveRaw := currentPlan.ExclusivePlanIds
+	if rawReq.Plan.ExclusivePlanIds != nil {
+		exclusiveRaw = *rawReq.Plan.ExclusivePlanIds
+	}
+	normalizedExclusive, err := normalizeExclusivePlanIds(exclusiveRaw, id)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
 		// update plan (allow zero values updates with map)
 		updateMap := map[string]interface{}{
 			"title":                      req.Plan.Title,
@@ -235,6 +319,9 @@ func AdminUpdateSubscriptionPlan(c *gin.Context) {
 			"stripe_price_id":            req.Plan.StripePriceId,
 			"creem_product_id":           req.Plan.CreemProductId,
 			"max_purchase_per_user":      req.Plan.MaxPurchasePerUser,
+			"exclusive_plan_ids":         normalizedExclusive,
+			"disallow_stack":             disallowStack,
+			"allow_wallet_pay":           allowWalletPay,
 			"total_amount":               req.Plan.TotalAmount,
 			"upgrade_group":              req.Plan.UpgradeGroup,
 			"quota_reset_period":         req.Plan.QuotaResetPeriod,
@@ -288,6 +375,15 @@ func AdminBindSubscription(c *gin.Context) {
 		common.ApiErrorMsg(c, "参数错误")
 		return
 	}
+	plan, err := model.GetSubscriptionPlanById(req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.CheckSubscriptionPurchaseEligibility(req.UserId, plan); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
 	msg, err := model.AdminBindSubscription(req.UserId, req.PlanId, "")
 	if err != nil {
 		common.ApiError(c, err)
@@ -330,6 +426,15 @@ func AdminCreateUserSubscription(c *gin.Context) {
 	var req AdminCreateUserSubscriptionRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.PlanId <= 0 {
 		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	plan, err := model.GetSubscriptionPlanById(req.PlanId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.CheckSubscriptionPurchaseEligibility(userId, plan); err != nil {
+		common.ApiErrorMsg(c, err.Error())
 		return
 	}
 	msg, err := model.AdminBindSubscription(userId, req.PlanId, "")

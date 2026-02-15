@@ -75,7 +75,7 @@ const SubscriptionPurchaseModal = ({
   const hasStripe = enableStripeTopUp && !!plan?.stripe_price_id;
   const hasCreem = enableCreemTopUp && !!plan?.creem_product_id;
   const hasEpay = enableOnlineTopUp && epayMethods.length > 0;
-  const hasWallet = walletQuota >= 0;
+  const hasWallet = plan?.allow_wallet_pay !== false && walletQuota >= 0;
   const hasAnyPayment = hasStripe || hasCreem || hasEpay || hasWallet;
   const purchaseLimit = Number(purchaseLimitInfo?.limit || 0);
   const purchaseCount = Number(purchaseLimitInfo?.count || 0);
