@@ -105,6 +105,19 @@ export const getRedemptionsColumns = ({
       },
     },
     {
+      title: t('剩余次数'),
+      dataIndex: 'remaining_uses',
+      render: (text, record) => {
+        const remaining = Number(text) >= 0 ? Number(text) : 0;
+        const maxUses = Number(record?.max_uses) || 0;
+        return (
+          <Tag color={remaining > 0 ? 'blue' : 'grey'} shape='circle'>
+            {`${remaining} / ${maxUses}`}
+          </Tag>
+        );
+      },
+    },
+    {
       title: t('额度'),
       dataIndex: 'quota',
       render: (text) => {

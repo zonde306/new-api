@@ -984,7 +984,12 @@ func TopUp(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
 			return
 		}
-		common.ApiError(c, err)
+		switch err.Error() {
+		case i18n.MsgRedemptionInvalid, i18n.MsgRedemptionUsed, i18n.MsgRedemptionExpired, i18n.MsgRedemptionNotProvided:
+			common.ApiErrorI18n(c, err.Error())
+		default:
+			common.ApiError(c, err)
+		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

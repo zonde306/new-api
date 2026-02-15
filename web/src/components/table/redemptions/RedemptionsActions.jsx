@@ -62,7 +62,7 @@ const RedemptionsActions = ({
         onClick={batchDeleteRedemptions}
         size='small'
       >
-        {t('清除失效兑换码')}
+        {t('删除所选兑换码')}
       </Button>
     </div>
   );

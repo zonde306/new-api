@@ -67,7 +67,20 @@ export const useRedemptionsData = () => {
 
   // Set redemption data format
   const setRedemptionFormat = (redemptions) => {
-    setRedemptions(redemptions);
+    const normalized = (redemptions || []).map((item) => {
+      const maxUses = Number(item.max_uses) || 0;
+      const usedCount = Number(item.used_count) || 0;
+      return {
+        ...item,
+        max_uses: maxUses,
+        used_count: usedCount,
+        remaining_uses:
+          Number(item.remaining_uses) >= 0
+            ? Number(item.remaining_uses)
+            : Math.max(maxUses - usedCount, 0),
+      };
+    });
+    setRedemptions(normalized);
   };
 
   // Load redemption list
@@ -252,17 +265,34 @@ export const useRedemptionsData = () => {
     await copyText(keys);
   };
 
-  // Batch delete redemption codes (clear invalid)
+  // Batch delete selected redemption codes
   const batchDeleteRedemptions = async () => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个兑换码！'));
+      return;
+    }
+
     Modal.confirm({
-      title: t('确定清除所有失效兑换码？'),
-      content: t('将删除已使用、已禁用及过期的兑换码，此操作不可撤销。'),
+      title: t('确定要删除所选的 {{count}} 个兑换码吗？', {
+        count: selectedKeys.length,
+      }),
+      content: t('将删除所选兑换码（包括未失效兑换码），此操作不可撤销。'),
       onOk: async () => {
         setLoading(true);
-        const res = await API.delete('/api/redemption/invalid');
+        const ids = selectedKeys
+          .map((item) => Number(item.id))
+          .filter((id) => Number.isInteger(id) && id > 0);
+        if (ids.length === 0) {
+          showError(t('请至少选择一个兑换码！'));
+          setLoading(false);
+          return;
+        }
+
+        const res = await API.post('/api/redemption/batch', { ids });
         const { success, message, data } = res.data;
         if (success) {
-          showSuccess(t('已删除 {{count}} 条失效兑换码', { count: data }));
+          showSuccess(t('已删除 {{count}} 个兑换码', { count: data }));
+          setSelectedKeys([]);
           await refresh();
         } else {
           showError(message);

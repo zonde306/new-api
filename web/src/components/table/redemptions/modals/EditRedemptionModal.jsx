@@ -61,6 +61,7 @@ const EditRedemptionModal = (props) => {
   const getInitValues = () => ({
     name: '',
     quota: 100000,
+    max_uses: 1,
     count: 1,
     expired_time: null,
   });
@@ -105,6 +106,7 @@ const EditRedemptionModal = (props) => {
     let localInputs = { ...values };
     localInputs.count = parseInt(localInputs.count) || 0;
     localInputs.quota = parseInt(localInputs.quota) || 0;
+    localInputs.max_uses = parseInt(localInputs.max_uses) || 0;
     localInputs.name = name;
     if (!localInputs.expired_time) {
       localInputs.expired_time = 0;
@@ -314,6 +316,26 @@ const EditRedemptionModal = (props) => {
                           { value: 250000000, label: '500$' },
                           { value: 500000000, label: '1000$' },
                         ]}
+                        showClear
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.InputNumber
+                        field='max_uses'
+                        label={t('可用次数')}
+                        min={1}
+                        rules={[
+                          { required: true, message: t('请输入可用次数') },
+                          {
+                            validator: (rule, v) => {
+                              const num = parseInt(v, 10);
+                              return num > 0
+                                ? Promise.resolve()
+                                : Promise.reject(t('可用次数必须大于0'));
+                            },
+                          },
+                        ]}
+                        style={{ width: '100%' }}
                         showClear
                       />
                     </Col>
