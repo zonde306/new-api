@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -45,11 +46,64 @@ func GetGroupEnabledModels(group string) []string {
 	return models
 }
 
+func GetGroupEnabledModelsWithoutHidden(group string, hiddenModels []string) []string {
+	models := GetGroupEnabledModels(group)
+	if len(models) == 0 || len(hiddenModels) == 0 {
+		return models
+	}
+	hiddenSet := make(map[string]struct{}, len(hiddenModels))
+	for _, hiddenModel := range hiddenModels {
+		hiddenModel = strings.TrimSpace(hiddenModel)
+		if hiddenModel == "" {
+			continue
+		}
+		hiddenSet[hiddenModel] = struct{}{}
+	}
+	if len(hiddenSet) == 0 {
+		return models
+	}
+	filtered := make([]string, 0, len(models))
+	for _, modelName := range models {
+		if _, ok := hiddenSet[modelName]; ok {
+			continue
+		}
+		filtered = append(filtered, modelName)
+	}
+	return filtered
+}
+
 func GetEnabledModels() []string {
 	var models []string
 	// Find distinct models
 	DB.Table("abilities").Where("enabled = ?", true).Distinct("model").Pluck("model", &models)
 	return models
+}
+
+func GetEnabledModelsWithoutHidden(hiddenModels []string) []string {
+	models := GetEnabledModels()
+	if len(models) == 0 || len(hiddenModels) == 0 {
+		return models
+	}
+	hiddenSet := make(map[string]struct{}, len(hiddenModels))
+	for _, hiddenModel := range hiddenModels {
+		hiddenModel = strings.TrimSpace(hiddenModel)
+		if hiddenModel == "" {
+			continue
+		}
+		hiddenSet[hiddenModel] = struct{}{}
+	}
+	if len(hiddenSet) == 0 {
+		return models
+	}
+	filtered := make([]string, 0, len(models))
+	for _, modelName := range models {
+		if _, ok := hiddenSet[modelName]; ok {
+			continue
+		}
+		filtered = append(filtered, modelName)
+	}
+	sort.Strings(filtered)
+	return filtered
 }
 
 func GetAllEnableAbilities() []Ability {

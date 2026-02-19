@@ -145,6 +145,7 @@ const EditChannelModal = (props) => {
     model_mapping: '',
     status_code_mapping: '',
     models: [],
+    hidden_models: [],
     auto_ban: 1,
     test_model: '',
     groups: ['default'],
@@ -447,8 +448,10 @@ const EditChannelModal = (props) => {
     if (formApiRef.current) {
       formApiRef.current.setValue(name, value);
     }
-    if (name === 'models' && Array.isArray(value)) {
-      value = Array.from(new Set(value.map((m) => (m || '').trim())));
+    if ((name === 'models' || name === 'hidden_models') && Array.isArray(value)) {
+      value = Array.from(new Set(value.map((m) => (m || '').trim()))).filter(
+        Boolean,
+      );
     }
 
     if (name === 'base_url' && value.endsWith('/v1')) {
@@ -599,6 +602,12 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          const hiddenModels = Array.isArray(parsedSettings.hidden_models)
+            ? parsedSettings.hidden_models
+                .map((model) => String(model || '').trim())
+                .filter(Boolean)
+            : [];
+          data.hidden_models = Array.from(new Set(hiddenModels));
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -607,6 +616,7 @@ const EditChannelModal = (props) => {
           data.pass_through_body_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.hidden_models = [];
         }
       } else {
         data.force_format = false;
@@ -615,6 +625,7 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.hidden_models = [];
       }
 
       if (data.settings) {
@@ -951,6 +962,17 @@ const EditChannelModal = (props) => {
       }
     });
 
+    (inputs.hidden_models || []).forEach((model) => {
+      const v = (model || '').trim();
+      if (!modelMap.has(v)) {
+        modelMap.set(v, {
+          key: v,
+          label: v,
+          value: v,
+        });
+      }
+    });
+
     const categories = getModelCategories(t);
     const optionsWithIcon = Array.from(modelMap.values()).map((opt) => {
       const modelName = opt.value;
@@ -973,7 +995,7 @@ const EditChannelModal = (props) => {
     });
 
     setModelOptions(optionsWithIcon);
-  }, [originModelOptions, inputs.models, t]);
+  }, [originModelOptions, inputs.models, inputs.hidden_models, t]);
 
   useEffect(() => {
     fetchModels().then();
@@ -1313,6 +1335,15 @@ const EditChannelModal = (props) => {
       .filter(Boolean);
     localInputs.models = normalizedModels;
 
+    const normalizedHiddenModels = Array.from(
+      new Set(
+        (localInputs.hidden_models || [])
+          .map((model) => (model || '').trim())
+          .filter(Boolean),
+      ),
+    );
+    localInputs.hidden_models = normalizedHiddenModels;
+
     if (
       parsedModelMapping &&
       typeof parsedModelMapping === 'object' &&
@@ -1358,6 +1389,7 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
       system_prompt: localInputs.system_prompt || '',
       system_prompt_override: localInputs.system_prompt_override || false,
+      hidden_models: normalizedHiddenModels,
     };
     localInputs.setting = JSON.stringify(channelExtraSettings);
 
@@ -1404,6 +1436,9 @@ const EditChannelModal = (props) => {
     }
 
     localInputs.settings = JSON.stringify(settings);
+
+    // hidden_models 通过 setting 字段传递
+    delete localInputs.hidden_models;
 
     // 清理不需要发送到后端的字段
     delete localInputs.force_format;
@@ -2873,6 +2908,77 @@ const EditChannelModal = (props) => {
                                 {group.name}
                               </Button>
                             ))}
+                        </Space>
+                      }
+                    />
+
+                    <Form.Select
+                      field='hidden_models'
+                      label={t('隐藏模型')}
+                      placeholder={t('选择需要在模型列表中隐藏的模型')}
+                      multiple
+                      filter={selectFilter}
+                      autoClearSearchValue={false}
+                      searchPosition='dropdown'
+                      allowAdditions
+                      additionLabel={t('添加自定义隐藏模型：')}
+                      optionList={modelOptions}
+                      style={{ width: '100%' }}
+                      onChange={(value) =>
+                        handleInputChange('hidden_models', value)
+                      }
+                      renderSelectedItem={(optionNode) => {
+                        const modelName = String(optionNode?.value ?? '');
+                        return {
+                          isRenderInTag: true,
+                          content: (
+                            <span
+                              className='cursor-pointer select-none'
+                              role='button'
+                              tabIndex={0}
+                              title={t('点击复制模型名称')}
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                const ok = await copy(modelName);
+                                if (ok) {
+                                  showSuccess(
+                                    t('已复制：{{name}}', { name: modelName }),
+                                  );
+                                } else {
+                                  showError(t('复制失败'));
+                                }
+                              }}
+                            >
+                              {optionNode.label || modelName}
+                            </span>
+                          ),
+                        };
+                      }}
+                      extraText={
+                        <Space wrap>
+                          <Text type='tertiary' size='small'>
+                            {t(
+                              '隐藏模型仅影响模型列表展示，不影响转发与路由；直接调用该模型仍可使用。',
+                            )}
+                          </Text>
+                          <Button
+                            size='small'
+                            type='tertiary'
+                            onClick={() =>
+                              handleInputChange('hidden_models', inputs.models)
+                            }
+                          >
+                            {t('按已选模型填入')}
+                          </Button>
+                          <Button
+                            size='small'
+                            type='warning'
+                            onClick={() =>
+                              handleInputChange('hidden_models', [])
+                            }
+                          >
+                            {t('清空隐藏模型')}
+                          </Button>
                         </Space>
                       }
                     />

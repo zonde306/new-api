@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"sync"
 
@@ -872,6 +873,109 @@ func (channel *Channel) GetSetting() dto.ChannelSettings {
 		}
 	}
 	return setting
+}
+
+func (channel *Channel) GetHiddenModels() []string {
+	setting := channel.GetSetting()
+	if len(setting.HiddenModels) == 0 {
+		return []string{}
+	}
+	normalized := make([]string, 0, len(setting.HiddenModels))
+	seen := make(map[string]struct{}, len(setting.HiddenModels))
+	for _, modelName := range setting.HiddenModels {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		normalized = append(normalized, modelName)
+	}
+	return normalized
+}
+
+const enabledHiddenModelsCacheTTL = int64(10)
+
+var enabledHiddenModelsCache = struct {
+	sync.RWMutex
+	models   []string
+	expireAt int64
+}{}
+
+func getHiddenModelsFromRawSetting(rawSetting string) []string {
+	parsed := dto.ChannelSettings{}
+	if strings.TrimSpace(rawSetting) == "" {
+		return []string{}
+	}
+	if err := common.UnmarshalJsonStr(rawSetting, &parsed); err != nil {
+		return []string{}
+	}
+	if len(parsed.HiddenModels) == 0 {
+		return []string{}
+	}
+	normalized := make([]string, 0, len(parsed.HiddenModels))
+	seen := make(map[string]struct{}, len(parsed.HiddenModels))
+	for _, modelName := range parsed.HiddenModels {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			continue
+		}
+		if _, ok := seen[modelName]; ok {
+			continue
+		}
+		seen[modelName] = struct{}{}
+		normalized = append(normalized, modelName)
+	}
+	return normalized
+}
+
+func GetEnabledHiddenModels() []string {
+	now := common.GetTimestamp()
+	enabledHiddenModelsCache.RLock()
+	if enabledHiddenModelsCache.models != nil && now < enabledHiddenModelsCache.expireAt {
+		cached := append([]string(nil), enabledHiddenModelsCache.models...)
+		enabledHiddenModelsCache.RUnlock()
+		return cached
+	}
+	enabledHiddenModelsCache.RUnlock()
+
+	var channels []*Channel
+	err := DB.Select("setting").Where("status = ?", common.ChannelStatusEnabled).Find(&channels).Error
+	if err != nil {
+		common.SysLog(fmt.Sprintf("failed to query enabled channels hidden models: %v", err))
+		return []string{}
+	}
+
+	hiddenSet := make(map[string]struct{})
+	for _, channel := range channels {
+		if channel == nil || channel.Setting == nil {
+			continue
+		}
+		for _, modelName := range getHiddenModelsFromRawSetting(*channel.Setting) {
+			hiddenSet[modelName] = struct{}{}
+		}
+	}
+	if len(hiddenSet) == 0 {
+		enabledHiddenModelsCache.Lock()
+		enabledHiddenModelsCache.models = []string{}
+		enabledHiddenModelsCache.expireAt = now + enabledHiddenModelsCacheTTL
+		enabledHiddenModelsCache.Unlock()
+		return []string{}
+	}
+	hiddenModels := make([]string, 0, len(hiddenSet))
+	for modelName := range hiddenSet {
+		hiddenModels = append(hiddenModels, modelName)
+	}
+	sort.Strings(hiddenModels)
+
+	enabledHiddenModelsCache.Lock()
+	enabledHiddenModelsCache.models = append([]string(nil), hiddenModels...)
+	enabledHiddenModelsCache.expireAt = now + enabledHiddenModelsCacheTTL
+	enabledHiddenModelsCache.Unlock()
+
+	return hiddenModels
 }
 
 func (channel *Channel) SetSetting(setting dto.ChannelSettings) {

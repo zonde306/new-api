@@ -521,9 +521,10 @@ func GetUserModels(c *gin.Context) {
 		return
 	}
 	groups := service.GetUserUsableGroups(user.Group)
+	hiddenModels := model.GetEnabledHiddenModels()
 	var models []string
 	for group := range groups {
-		for _, g := range model.GetGroupEnabledModels(group) {
+		for _, g := range model.GetGroupEnabledModelsWithoutHidden(group, hiddenModels) {
 			if !common.StringsContains(models, g) {
 				models = append(models, g)
 			}

@@ -111,6 +111,11 @@ func init() {
 
 func ListModels(c *gin.Context, modelType int) {
 	userOpenAiModels := make([]dto.OpenAIModels, 0)
+	hiddenModels := model.GetEnabledHiddenModels()
+	hiddenModelSet := make(map[string]struct{}, len(hiddenModels))
+	for _, modelName := range hiddenModels {
+		hiddenModelSet[modelName] = struct{}{}
+	}
 
 	acceptUnsetRatioModel := operation_setting.SelfUseModeEnabled
 	if !acceptUnsetRatioModel {
@@ -132,7 +137,10 @@ func ListModels(c *gin.Context, modelType int) {
 		} else {
 			tokenModelLimit = map[string]bool{}
 		}
-		for allowModel, _ := range tokenModelLimit {
+		for allowModel := range tokenModelLimit {
+			if _, hidden := hiddenModelSet[allowModel]; hidden {
+				continue
+			}
 			if !acceptUnsetRatioModel {
 				_, _, exist := ratio_setting.GetModelRatioOrPrice(allowModel)
 				if !exist {
@@ -170,7 +178,7 @@ func ListModels(c *gin.Context, modelType int) {
 		var models []string
 		if tokenGroup == "auto" {
 			for _, autoGroup := range service.GetUserAutoGroup(userGroup) {
-				groupModels := model.GetGroupEnabledModels(autoGroup)
+				groupModels := model.GetGroupEnabledModelsWithoutHidden(autoGroup, hiddenModels)
 				for _, g := range groupModels {
 					if !common.StringsContains(models, g) {
 						models = append(models, g)
@@ -178,9 +186,12 @@ func ListModels(c *gin.Context, modelType int) {
 				}
 			}
 		} else {
-			models = model.GetGroupEnabledModels(group)
+			models = model.GetGroupEnabledModelsWithoutHidden(group, hiddenModels)
 		}
 		for _, modelName := range models {
+			if _, hidden := hiddenModelSet[modelName]; hidden {
+				continue
+			}
 			if !acceptUnsetRatioModel {
 				_, _, exist := ratio_setting.GetModelRatioOrPrice(modelName)
 				if !exist {
@@ -213,11 +224,17 @@ func ListModels(c *gin.Context, modelType int) {
 				Type:        "model",
 			}
 		}
+		firstID := ""
+		lastID := ""
+		if len(useranthropicModels) > 0 {
+			firstID = useranthropicModels[0].ID
+			lastID = useranthropicModels[len(useranthropicModels)-1].ID
+		}
 		c.JSON(200, gin.H{
 			"data":     useranthropicModels,
-			"first_id": useranthropicModels[0].ID,
+			"first_id": firstID,
 			"has_more": false,
-			"last_id":  useranthropicModels[len(useranthropicModels)-1].ID,
+			"last_id":  lastID,
 		})
 	case constant.ChannelTypeGemini:
 		userGeminiModels := make([]dto.GeminiModel, len(userOpenAiModels))
@@ -255,9 +272,10 @@ func DashboardListModels(c *gin.Context) {
 }
 
 func EnabledListModels(c *gin.Context) {
+	hiddenModels := model.GetEnabledHiddenModels()
 	c.JSON(200, gin.H{
 		"success": true,
-		"data":    model.GetEnabledModels(),
+		"data":    model.GetEnabledModelsWithoutHidden(hiddenModels),
 	})
 }
 
