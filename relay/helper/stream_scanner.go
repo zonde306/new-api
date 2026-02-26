@@ -219,8 +219,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			}
 
 			data := strings.TrimPrefix(line, "data:")
-			data = strings.TrimLeft(data, " ")
 			data = strings.TrimSuffix(data, "\r")
+			data = strings.TrimSpace(data)
 			if strings.HasPrefix(data, "[DONE]") {
 				select {
 				case scannerEventChan <- streamScannerEvent{done: true}:
