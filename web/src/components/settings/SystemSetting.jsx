@@ -1491,11 +1491,11 @@ const SystemSetting = () => {
                         field="['discord.guilds']"
                         label={t('Discord 服务器准入配置')}
                         placeholder={t(
-                          '支持 JSON 配置 AND/OR 条件，留空表示不限制。示例：{"and":["guild_id_1"],"or":["guild_id_2","guild_id_3"]}',
+                          '仅支持 JSON 映射格式，留空表示不限制。示例：{"服务器ID":["-身份组ID1","身份组ID2","+身份组ID3"],"-服务器ID2":[]}',
                         )}
                         autosize
                         extraText={t(
-                          'and: 必须同时加入全部服务器；or: 加入任一服务器即可。两个字段可同时使用。',
+                          '前缀规则：+ 表示必须满足，- 表示必须不满足，无前缀表示同层至少满足一个。服务器层与身份组层都按此规则计算。',
                         )}
                       />
                     </Col>

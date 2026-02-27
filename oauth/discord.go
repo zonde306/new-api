@@ -42,6 +42,10 @@ type discordGuild struct {
 	ID string `json:"id"`
 }
 
+type discordGuildMember struct {
+	Roles []string `json:"roles"`
+}
+
 func (p *DiscordProvider) GetName() string {
 	return "Discord"
 }
@@ -204,30 +208,66 @@ func verifyDiscordGuildMembership(ctx context.Context, client *http.Client, acce
 		}
 	}
 
-	if len(rule.And) > 0 {
-		for _, guildID := range rule.And {
-			if _, ok := guildSet[guildID]; !ok {
-				logger.LogDebug(ctx, "[OAuth-Discord] Guild requirement (AND) failed: %s", guildID)
-				return NewOAuthError(i18n.MsgOAuthDiscordGuildRequired, nil)
-			}
+	guildRoleSetCache := make(map[string]map[string]struct{})
+	roleProvider := func(guildID string) (map[string]struct{}, error) {
+		if roleSet, exists := guildRoleSetCache[guildID]; exists {
+			return roleSet, nil
 		}
+		roleSet, getErr := getDiscordGuildRoleSet(ctx, client, accessToken, guildID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		guildRoleSetCache[guildID] = roleSet
+		return roleSet, nil
 	}
 
-	if len(rule.Or) > 0 {
-		matched := false
-		for _, guildID := range rule.Or {
-			if _, ok := guildSet[guildID]; ok {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			logger.LogDebug(ctx, "[OAuth-Discord] Guild requirement (OR) failed")
-			return NewOAuthError(i18n.MsgOAuthDiscordGuildRequired, nil)
-		}
+	matched, evalErr := rule.Evaluate(guildSet, roleProvider)
+	if evalErr != nil {
+		logger.LogError(ctx, fmt.Sprintf("[OAuth-Discord] Guild rule evaluate error: %s", evalErr.Error()))
+		return NewOAuthErrorWithRaw(i18n.MsgOAuthDiscordGuildCheckFailed, nil, evalErr.Error())
+	}
+	if !matched {
+		logger.LogDebug(ctx, "[OAuth-Discord] Guild requirement failed")
+		return NewOAuthError(i18n.MsgOAuthDiscordGuildRequired, nil)
 	}
 
 	return nil
+}
+
+func getDiscordGuildRoleSet(ctx context.Context, client *http.Client, accessToken, guildID string) (map[string]struct{}, error) {
+	memberURL := fmt.Sprintf("https://discord.com/api/v10/users/@me/guilds/%s/member", url.PathEscape(guildID))
+	req, err := http.NewRequestWithContext(ctx, "GET", memberURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	logger.LogDebug(ctx, "[OAuth-Discord] GetGuildMember response status: guild=%s status=%d", guildID, res.StatusCode)
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("get discord guild member failed: guild=%s status=%d", guildID, res.StatusCode)
+	}
+
+	var member discordGuildMember
+	if err = common.DecodeJson(res.Body, &member); err != nil {
+		return nil, err
+	}
+
+	roleSet := make(map[string]struct{}, len(member.Roles))
+	for _, roleID := range member.Roles {
+		trimmed := strings.TrimSpace(roleID)
+		if trimmed == "" {
+			continue
+		}
+		roleSet[trimmed] = struct{}{}
+	}
+	return roleSet, nil
 }
 
 func (p *DiscordProvider) IsUserIDTaken(providerUserID string) bool {
