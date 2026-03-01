@@ -58,6 +58,10 @@ func Login(c *gin.Context) {
 		})
 		return
 	}
+	if common.PasswordLoginAdminOnlyEnabled && user.Role < common.RoleAdminUser {
+		common.ApiErrorI18n(c, i18n.MsgUserPasswordLoginAdminOnly)
+		return
+	}
 
 	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {

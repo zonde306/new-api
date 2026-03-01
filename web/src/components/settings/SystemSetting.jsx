@@ -48,6 +48,7 @@ const SystemSetting = () => {
   const { t } = useTranslation();
   let [inputs, setInputs] = useState({
     PasswordLoginEnabled: '',
+    PasswordLoginAdminOnlyEnabled: '',
     PasswordRegisterEnabled: '',
     EmailVerificationEnabled: '',
     GitHubOAuthEnabled: '',
@@ -173,6 +174,7 @@ const SystemSetting = () => {
             }
             break;
           case 'PasswordLoginEnabled':
+          case 'PasswordLoginAdminOnlyEnabled':
           case 'PasswordRegisterEnabled':
           case 'EmailVerificationEnabled':
           case 'GitHubOAuthEnabled':
@@ -1003,6 +1005,16 @@ const SystemSetting = () => {
                         }
                       >
                         {t('允许通过密码进行登录')}
+                      </Form.Checkbox>
+                      <Form.Checkbox
+                        field='PasswordLoginAdminOnlyEnabled'
+                        noLabel
+                        disabled={!inputs.PasswordLoginEnabled}
+                        onChange={(e) =>
+                          handleCheckboxChange('PasswordLoginAdminOnlyEnabled', e)
+                        }
+                      >
+                        {t('只允许管理员使用密码登录')}
                       </Form.Checkbox>
                       <Form.Checkbox
                         field='PasswordRegisterEnabled'
