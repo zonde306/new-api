@@ -34,7 +34,7 @@ import {
   TextArea,
   Typography,
 } from '@douyinfe/semi-ui';
-import { IconDelete, IconPlus } from '@douyinfe/semi-icons';
+import { IconDelete, IconMenu, IconPlus } from '@douyinfe/semi-icons';
 import { copy, showError, showSuccess, verifyJSON } from '../../../../helpers';
 import {
   CLAUDE_CLI_HEADER_PASSTHROUGH_TEMPLATE,
@@ -276,6 +276,7 @@ const LEGACY_TEMPLATE = {
 const OPERATION_TEMPLATE = {
   operations: [
     {
+      description: 'Set default temperature for openai/* models.',
       path: 'temperature',
       mode: 'set',
       value: 0.7,
@@ -294,8 +295,9 @@ const OPERATION_TEMPLATE = {
 const HEADER_PASSTHROUGH_TEMPLATE = {
   operations: [
     {
+      description: 'Pass through X-Request-Id header to upstream.',
       mode: 'pass_headers',
-      value: ['Authorization'],
+      value: ['X-Request-Id'],
       keep_origin: true,
     },
   ],
@@ -304,6 +306,8 @@ const HEADER_PASSTHROUGH_TEMPLATE = {
 const GEMINI_IMAGE_4K_TEMPLATE = {
   operations: [
     {
+      description:
+        'Set imageSize to 4K when model contains gemini/image and ends with 4k.',
       mode: 'set',
       path: 'generationConfig.imageConfig.imageSize',
       value: '4K',
@@ -311,7 +315,17 @@ const GEMINI_IMAGE_4K_TEMPLATE = {
         {
           path: 'original_model',
           mode: 'contains',
-          value: 'gemini-3-pro-image-preview',
+          value: 'gemini',
+        },
+        {
+          path: 'original_model',
+          mode: 'contains',
+          value: 'image',
+        },
+        {
+          path: 'original_model',
+          mode: 'suffix',
+          value: '4k',
         },
       ],
       logic: 'AND',
@@ -319,11 +333,13 @@ const GEMINI_IMAGE_4K_TEMPLATE = {
   ],
 };
 
-const AWS_BEDROCK_ANTHROPIC_BETA_OVERRIDE_TEMPLATE = {
+const AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE = {
   operations: [
     {
+      description: 'Normalize anthropic-beta header tokens for Bedrock compatibility.',
       mode: 'set_header',
       path: 'anthropic-beta',
+      // https://github.com/BerriAI/litellm/blob/main/litellm/anthropic_beta_headers_config.json
       value: {
         'advanced-tool-use-2025-11-20': 'tool-search-tool-2025-10-19',
         bash_20241022: null,
@@ -355,6 +371,11 @@ const AWS_BEDROCK_ANTHROPIC_BETA_OVERRIDE_TEMPLATE = {
         'web-search-2025-03-05': null,
       },
     },
+    {
+      description: 'Remove all tools[*].custom.input_examples before upstream relay.',
+      mode: 'delete',
+      path: 'tools.*.custom.input_examples',
+    },
   ],
 };
 
@@ -378,7 +399,7 @@ const TEMPLATE_PRESET_CONFIG = {
   },
   pass_headers_auth: {
     group: 'scenario',
-    label: '请求头透传（Authorization）',
+    label: '请求头透传（X-Request-Id）',
     kind: 'operations',
     payload: HEADER_PASSTHROUGH_TEMPLATE,
   },
@@ -402,9 +423,9 @@ const TEMPLATE_PRESET_CONFIG = {
   },
   aws_bedrock_anthropic_beta_override: {
     group: 'scenario',
-    label: 'AWS Bedrock anthropic-beta覆盖',
+    label: 'AWS Bedrock Claude 兼容模板',
     kind: 'operations',
-    payload: AWS_BEDROCK_ANTHROPIC_BETA_OVERRIDE_TEMPLATE,
+    payload: AWS_BEDROCK_ANTHROPIC_COMPAT_TEMPLATE,
   },
 };
 
@@ -764,6 +785,7 @@ const createDefaultCondition = () => normalizeCondition({});
 
 const normalizeOperation = (operation = {}) => ({
   id: nextLocalId(),
+  description: typeof operation.description === 'string' ? operation.description : '',
   path: typeof operation.path === 'string' ? operation.path : '',
   mode: OPERATION_MODE_VALUES.has(operation.mode) ? operation.mode : 'set',
   value_text: toValueText(operation.value),
@@ -777,6 +799,38 @@ const normalizeOperation = (operation = {}) => ({
 });
 
 const createDefaultOperation = () => normalizeOperation({ mode: 'set' });
+
+const reorderOperations = (
+  sourceOperations = [],
+  sourceId,
+  targetId,
+  position = 'before',
+) => {
+  if (!sourceId || !targetId || sourceId === targetId) {
+    return sourceOperations;
+  }
+
+  const sourceIndex = sourceOperations.findIndex((item) => item.id === sourceId);
+
+  if (sourceIndex < 0) {
+    return sourceOperations;
+  }
+
+  const nextOperations = [...sourceOperations];
+  const [moved] = nextOperations.splice(sourceIndex, 1);
+  let insertIndex = nextOperations.findIndex((item) => item.id === targetId);
+
+  if (insertIndex < 0) {
+    return sourceOperations;
+  }
+
+  if (position === 'after') {
+    insertIndex += 1;
+  }
+
+  nextOperations.splice(insertIndex, 0, moved);
+  return nextOperations;
+};
 
 const getOperationSummary = (operation = {}, index = 0) => {
   const mode = operation.mode || 'set';
@@ -1015,6 +1069,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
   const [operationSearch, setOperationSearch] = useState('');
   const [selectedOperationId, setSelectedOperationId] = useState('');
   const [expandedConditionMap, setExpandedConditionMap] = useState({});
+  const [draggedOperationId, setDraggedOperationId] = useState('');
+  const [dragOverOperationId, setDragOverOperationId] = useState('');
+  const [dragOverPosition, setDragOverPosition] = useState('before');
   const [templateGroupKey, setTemplateGroupKey] = useState('basic');
   const [templatePresetKey, setTemplatePresetKey] = useState('operations_default');
   const [fieldGuideVisible, setFieldGuideVisible] = useState(false);
@@ -1033,6 +1090,9 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setOperationSearch('');
     setSelectedOperationId(nextState.operations[0]?.id || '');
     setExpandedConditionMap({});
+    setDraggedOperationId('');
+    setDragOverOperationId('');
+    setDragOverPosition('before');
     if (nextState.visualMode === 'legacy') {
       setTemplateGroupKey('basic');
       setTemplatePresetKey('legacy_default');
@@ -1086,6 +1146,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     if (!keyword) return operations;
     return operations.filter((operation) => {
       const searchableText = [
+        operation.description,
         operation.mode,
         operation.path,
         operation.from,
@@ -1151,10 +1212,14 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       const payloadOps = filteredOps.map((operation) => {
         const mode = operation.mode || 'set';
         const meta = MODE_META[mode] || MODE_META.set;
+        const descriptionValue = String(operation.description || '').trim();
         const pathValue = operation.path.trim();
         const fromValue = operation.from.trim();
         const toValue = operation.to.trim();
         const payload = { mode };
+        if (descriptionValue) {
+          payload.description = descriptionValue;
+        }
         if (meta.path) {
           payload.path = pathValue;
         }
@@ -1556,6 +1621,67 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
     setSelectedOperationId(created.id);
   };
 
+  const resetOperationDragState = useCallback(() => {
+    setDraggedOperationId('');
+    setDragOverOperationId('');
+    setDragOverPosition('before');
+  }, []);
+
+  const moveOperation = useCallback(
+    (sourceId, targetId, position = 'before') => {
+      if (!sourceId || !targetId || sourceId === targetId) {
+        return;
+      }
+      setOperations((prev) =>
+        reorderOperations(prev, sourceId, targetId, position),
+      );
+      setSelectedOperationId(sourceId);
+    },
+    [],
+  );
+
+  const handleOperationDragStart = useCallback((event, operationId) => {
+    setDraggedOperationId(operationId);
+    setSelectedOperationId(operationId);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', operationId);
+  }, []);
+
+  const handleOperationDragOver = useCallback(
+    (event, operationId) => {
+      event.preventDefault();
+      if (!draggedOperationId || draggedOperationId === operationId) {
+        return;
+      }
+      const rect = event.currentTarget.getBoundingClientRect();
+      const position =
+        event.clientY - rect.top > rect.height / 2 ? 'after' : 'before';
+      setDragOverOperationId(operationId);
+      setDragOverPosition(position);
+      event.dataTransfer.dropEffect = 'move';
+    },
+    [draggedOperationId],
+  );
+
+  const handleOperationDrop = useCallback(
+    (event, operationId) => {
+      event.preventDefault();
+      const sourceId =
+        draggedOperationId || event.dataTransfer.getData('text/plain');
+      const position =
+        dragOverOperationId === operationId ? dragOverPosition : 'before';
+      moveOperation(sourceId, operationId, position);
+      resetOperationDragState();
+    },
+    [
+      dragOverOperationId,
+      dragOverPosition,
+      draggedOperationId,
+      moveOperation,
+      resetOperationDragState,
+    ],
+  );
+
   const duplicateOperation = (operationId) => {
     let insertedId = '';
     setOperations((prev) => {
@@ -1563,6 +1689,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
       if (index < 0) return prev;
       const source = prev[index];
       const cloned = normalizeOperation({
+        description: source.description,
         path: source.path,
         mode: source.mode,
         value: parseLooseValue(source.value_text),
@@ -1812,14 +1939,6 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                 {t('重置')}
               </Button>
             </Space>
-            <Text
-              type='tertiary'
-              size='small'
-              className='cursor-pointer select-none mt-1 whitespace-nowrap'
-              onClick={() => openFieldGuide('path')}
-            >
-              {t('字段速查')}
-            </Text>
           </div>
         </Card>
 
@@ -1891,7 +2010,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
 
                       <Input
                         value={operationSearch}
-                        placeholder={t('搜索规则（类型 / 路径 / 来源 / 目标）')}
+                        placeholder={t('搜索规则（描述 / 类型 / 路径 / 来源 / 目标）')}
                         onChange={(nextValue) =>
                           setOperationSearch(nextValue || '')
                         }
@@ -1921,14 +2040,31 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                               );
                               const isActive =
                                 operation.id === selectedOperationId;
+                              const isDragging =
+                                operation.id === draggedOperationId;
+                              const isDropTarget =
+                                operation.id === dragOverOperationId &&
+                                draggedOperationId &&
+                                draggedOperationId !== operation.id;
                               return (
                                 <div
                                   key={operation.id}
                                   role='button'
                                   tabIndex={0}
+                                  draggable={operations.length > 1}
                                   onClick={() =>
                                     setSelectedOperationId(operation.id)
                                   }
+                                  onDragStart={(event) =>
+                                    handleOperationDragStart(event, operation.id)
+                                  }
+                                  onDragOver={(event) =>
+                                    handleOperationDragOver(event, operation.id)
+                                  }
+                                  onDrop={(event) =>
+                                    handleOperationDrop(event, operation.id)
+                                  }
+                                  onDragEnd={resetOperationDragState}
                                   onKeyDown={(event) => {
                                     if (
                                       event.key === 'Enter' ||
@@ -1946,18 +2082,53 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                     border: isActive
                                       ? '1px solid var(--semi-color-primary)'
                                       : '1px solid var(--semi-color-border)',
+                                    opacity: isDragging ? 0.6 : 1,
+                                    boxShadow: isDropTarget
+                                      ? dragOverPosition === 'after'
+                                        ? 'inset 0 -3px 0 var(--semi-color-primary)'
+                                        : 'inset 0 3px 0 var(--semi-color-primary)'
+                                      : 'none',
                                   }}
                                 >
                                   <div className='flex items-start justify-between gap-2'>
-                                    <div>
-                                      <Text strong>{`#${index + 1}`}</Text>
-                                      <Text
-                                        type='tertiary'
-                                        size='small'
-                                        className='block mt-1'
+                                    <div className='flex items-start gap-2 min-w-0'>
+                                      <div
+                                        className='flex-shrink-0'
+                                        style={{
+                                          color: 'var(--semi-color-text-2)',
+                                          cursor: operations.length > 1 ? 'grab' : 'default',
+                                          marginTop: 1,
+                                        }}
                                       >
-                                        {getOperationSummary(operation, index)}
-                                      </Text>
+                                        <IconMenu />
+                                      </div>
+                                      <div className='min-w-0'>
+                                        <Text strong>{`#${index + 1}`}</Text>
+                                        <Text
+                                          type='tertiary'
+                                          size='small'
+                                          className='block mt-1'
+                                        >
+                                          {getOperationSummary(operation, index)}
+                                        </Text>
+                                        {String(operation.description || '').trim() ? (
+                                          <Text
+                                            type='tertiary'
+                                            size='small'
+                                            className='block mt-1'
+                                            style={{
+                                              lineHeight: 1.5,
+                                              wordBreak: 'break-word',
+                                              overflow: 'hidden',
+                                              display: '-webkit-box',
+                                              WebkitLineClamp: 2,
+                                              WebkitBoxOrient: 'vertical',
+                                            }}
+                                          >
+                                            {operation.description}
+                                          </Text>
+                                        ) : null}
+                                      </div>
                                     </div>
                                     <Tag size='small' color='grey'>
                                       {(operation.conditions || []).length}
@@ -2035,6 +2206,7 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                                   type='danger'
                                   theme='borderless'
                                   icon={<IconDelete />}
+                                  aria-label={t('删除规则')}
                                   onClick={() =>
                                     removeOperation(selectedOperation.id)
                                   }
@@ -2085,6 +2257,25 @@ const ParamOverrideEditorModal = ({ visible, value, onSave, onCancel }) => {
                             >
                               {MODE_DESCRIPTIONS[mode] || ''}
                             </Text>
+                            <div className='mt-2'>
+                              <Text type='tertiary' size='small'>
+                                {t('规则描述（可选）')}
+                              </Text>
+                              <Input
+                                value={selectedOperation.description || ''}
+                                placeholder={t('例如：清理工具参数，避免上游校验错误')}
+                                onChange={(nextValue) =>
+                                  updateOperation(selectedOperation.id, {
+                                    description: nextValue || '',
+                                  })
+                                }
+                                maxLength={180}
+                                showClear
+                              />
+                              <Text type='tertiary' size='small' className='mt-1 block'>
+                                {`${String(selectedOperation.description || '').length}/180`}
+                              </Text>
+                            </div>
 
                             {meta.value ? (
                               mode === 'return_error' && returnErrorDraft ? (
