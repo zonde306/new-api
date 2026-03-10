@@ -15,6 +15,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func buildMaskedTokenResponse(token *model.Token) *model.Token {
+	if token == nil {
+		return nil
+	}
+	maskedToken := *token
+	maskedToken.Key = token.GetMaskedKey()
+	return &maskedToken
+}
+
+func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
+	maskedTokens := make([]*model.Token, 0, len(tokens))
+	for _, token := range tokens {
+		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
+	}
+	return maskedTokens
+}
+
 func validateTokenRateLimit(token *model.Token) error {
 	if token.IPRateLimitCount < 0 {
 		return errors.New("令牌+IP 总请求数限制不能为负数")
@@ -36,7 +53,6 @@ func validateTokenRateLimit(token *model.Token) error {
 	}
 	return nil
 }
-
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	pageInfo := common.GetPageQuery(c)
@@ -47,9 +63,8 @@ func GetAllTokens(c *gin.Context) {
 	}
 	total, _ := model.CountUserTokens(userId)
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(tokens)
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
 	common.ApiSuccess(c, pageInfo)
-	return
 }
 
 func SearchTokens(c *gin.Context) {
@@ -65,9 +80,8 @@ func SearchTokens(c *gin.Context) {
 		return
 	}
 	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(tokens)
+	pageInfo.SetItems(buildMaskedTokenResponses(tokens))
 	common.ApiSuccess(c, pageInfo)
-	return
 }
 
 func GetToken(c *gin.Context) {
@@ -82,12 +96,24 @@ func GetToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    token,
+	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+}
+
+func GetTokenKey(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	userId := c.GetInt("id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token, err := model.GetTokenByIds(id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"key": token.GetFullKey(),
 	})
-	return
 }
 
 func GetTokenStatus(c *gin.Context) {
@@ -237,7 +263,6 @@ func AddToken(c *gin.Context) {
 		"success": true,
 		"message": "",
 	})
-	return
 }
 
 func DeleteToken(c *gin.Context) {
@@ -252,7 +277,6 @@ func DeleteToken(c *gin.Context) {
 		"success": true,
 		"message": "",
 	})
-	return
 }
 
 func UpdateToken(c *gin.Context) {
@@ -326,7 +350,7 @@ func UpdateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    cleanToken,
+		"data":    buildMaskedTokenResponse(cleanToken),
 	})
 }
 
