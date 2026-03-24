@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -9,18 +10,23 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 	"github.com/thanhpk/randstr"
 	waffo "github.com/waffo-com/waffo-go"
 	"github.com/waffo-com/waffo-go/config"
 	"github.com/waffo-com/waffo-go/core"
 	"github.com/waffo-com/waffo-go/types/order"
+	"gorm.io/gorm"
 )
+
+const topUpStatusFailed = "failed"
 
 func getWaffoSDK() (*waffo.Waffo, error) {
 	env := config.Sandbox
@@ -97,6 +103,57 @@ type WaffoPayRequest struct {
 	PayMethodIndex *int   `json:"pay_method_index"` // 服务端支付方式列表的索引，nil 表示由 Waffo 自动选择
 	PayMethodType  string `json:"pay_method_type"`  // Deprecated: 兼容旧前端，优先使用 pay_method_index
 	PayMethodName  string `json:"pay_method_name"`  // Deprecated: 兼容旧前端，优先使用 pay_method_index
+}
+
+func rechargeWaffo(referenceId string) error {
+	if referenceId == "" {
+		return errors.New("未提供支付单号")
+	}
+
+	var quotaToAdd int
+	topUp := &model.TopUp{}
+
+	refCol := "`trade_no`"
+	if common.UsingPostgreSQL {
+		refCol = `"trade_no"`
+	}
+
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(refCol+" = ?", referenceId).First(topUp).Error
+		if err != nil {
+			return errors.New("充值订单不存在")
+		}
+
+		if topUp.Status != common.TopUpStatusPending {
+			return errors.New("充值订单状态错误")
+		}
+
+		topUp.CompleteTime = common.GetTimestamp()
+		topUp.Status = common.TopUpStatusSuccess
+		if err = tx.Save(topUp).Error; err != nil {
+			return err
+		}
+
+		dAmount := decimal.NewFromInt(topUp.Amount)
+		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
+		quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		if quotaToAdd <= 0 {
+			return errors.New("无效的充值额度")
+		}
+
+		if err = tx.Model(&model.User{}).Where("id = ?", topUp.UserId).Update("quota", gorm.Expr("quota + ?", quotaToAdd)).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
+	if err != nil {
+		common.SysError("waffo topup failed: " + err.Error())
+		return errors.New("充值失败，请稍后重试")
+	}
+
+	model.RecordLog(topUp.UserId, model.LogTypeTopup, fmt.Sprintf("使用Waffo充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money))
+	return nil
 }
 
 // RequestWaffoPay 创建 Waffo 支付订单
@@ -195,7 +252,7 @@ func RequestWaffoPay(c *gin.Context) {
 	sdk, err := getWaffoSDK()
 	if err != nil {
 		log.Printf("Waffo SDK 初始化失败: %v", err)
-		topUp.Status = common.TopUpStatusFailed
+		topUp.Status = topUpStatusFailed
 		_ = topUp.Update()
 		c.JSON(200, gin.H{"message": "error", "data": "支付配置错误"})
 		return
@@ -239,14 +296,14 @@ func RequestWaffoPay(c *gin.Context) {
 	resp, err := sdk.Order().Create(c.Request.Context(), createParams, nil)
 	if err != nil {
 		log.Printf("Waffo 创建订单失败: %v", err)
-		topUp.Status = common.TopUpStatusFailed
+		topUp.Status = topUpStatusFailed
 		_ = topUp.Update()
 		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
 	}
 	if !resp.IsSuccess() {
 		log.Printf("Waffo 创建订单业务失败: [%s] %s, 完整响应: %+v", resp.Code, resp.Message, resp)
-		topUp.Status = common.TopUpStatusFailed
+		topUp.Status = topUpStatusFailed
 		_ = topUp.Update()
 		c.JSON(200, gin.H{"message": "error", "data": "拉起支付失败"})
 		return
@@ -344,7 +401,7 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 		if result.MerchantOrderID != "" {
 			if topUp := model.GetTopUpByTradeNo(result.MerchantOrderID); topUp != nil &&
 				topUp.Status == common.TopUpStatusPending {
-				topUp.Status = common.TopUpStatusFailed
+				topUp.Status = topUpStatusFailed
 				_ = topUp.Update()
 			}
 		}
@@ -357,7 +414,7 @@ func handleWaffoPayment(c *gin.Context, wh *core.WebhookHandler, result *core.Pa
 	LockOrder(merchantOrderId)
 	defer UnlockOrder(merchantOrderId)
 
-	if err := model.RechargeWaffo(merchantOrderId); err != nil {
+	if err := rechargeWaffo(merchantOrderId); err != nil {
 		log.Printf("Waffo 充值处理失败: %v, 订单: %s", err, merchantOrderId)
 		sendWaffoWebhookResponse(c, wh, false, err.Error())
 		return
