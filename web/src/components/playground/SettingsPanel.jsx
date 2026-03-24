@@ -44,7 +44,6 @@ const SettingsPanel = ({
   onCustomRequestModeChange,
   onCustomRequestBodyChange,
   previewPayload,
-  messages,
 }) => {
   const { t } = useTranslation();
 
@@ -98,7 +97,6 @@ const SettingsPanel = ({
             onConfigImport={onConfigImport}
             onConfigReset={onConfigReset}
             styleState={{ ...styleState, isMobile: false }}
-            messages={messages}
           />
         </div>
       )}
@@ -234,7 +232,6 @@ const SettingsPanel = ({
             onConfigImport={onConfigImport}
             onConfigReset={onConfigReset}
             styleState={styleState}
-            messages={messages}
           />
         </div>
       )}

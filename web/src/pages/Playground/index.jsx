@@ -530,7 +530,6 @@ const Playground = () => {
                 onCustomRequestModeChange={setCustomRequestMode}
                 onCustomRequestBodyChange={setCustomRequestBody}
                 previewPayload={previewPayload}
-                messages={message}
               />
             </Layout.Sider>
           )}

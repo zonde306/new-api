@@ -43,6 +43,10 @@ mermaid.initialize({
   securityLevel: 'loose',
 });
 
+const LARGE_CONTENT_SIMPLIFIED_THRESHOLD = 80000;
+const VERY_LARGE_CONTENT_THRESHOLD = 160000;
+const VERY_LARGE_CONTENT_PREVIEW_CHARS = 40000;
+
 export function Mermaid(props) {
   const ref = useRef(null);
   const [hasError, setHasError] = useState(false);
@@ -388,33 +392,97 @@ function _MarkdownContent(props) {
     allowHtml = false,
   } = props;
 
-  const escapedContent = useMemo(() => {
-    return tryWrapHtmlCode(escapeBrackets(content));
-  }, [content]);
+  const isVeryLargeContent = content.length > VERY_LARGE_CONTENT_THRESHOLD;
+  const isLargeContent = content.length > LARGE_CONTENT_SIMPLIFIED_THRESHOLD;
+  const shouldUsePlainTextMode = isLargeContent;
+
+  const effectiveContent = useMemo(() => {
+    const baseContent = tryWrapHtmlCode(escapeBrackets(content));
+    if (!isVeryLargeContent) {
+      return baseContent;
+    }
+
+    return (
+      baseContent.slice(0, VERY_LARGE_CONTENT_PREVIEW_CHARS) +
+      '\n\n---\n\n' +
+      '⚠️ 内容过长，已自动截断预览以避免浏览器内存占用过高。'
+    );
+  }, [content, isVeryLargeContent]);
+
+  const escapedContent = effectiveContent;
 
   // 判断是否为用户消息
   const isUserMessage = className && className.includes('user-message');
 
   const rehypePluginsBase = useMemo(() => {
     const base = [];
-    if (allowHtml) {
+    if (allowHtml && !shouldUsePlainTextMode) {
       base.push(RehypeRaw);
     }
-    base.push(
-      RehypeKatex,
-      [
-        RehypeHighlight,
-        {
-          detect: false,
-          ignoreMissing: true,
-        },
-      ],
-    );
-    if (animated) {
+    if (!shouldUsePlainTextMode) {
+      base.push(
+        RehypeKatex,
+        [
+          RehypeHighlight,
+          {
+            detect: false,
+            ignoreMissing: true,
+          },
+        ],
+      );
+    }
+    if (animated && !shouldUsePlainTextMode) {
       base.push([rehypeSplitWordsIntoSpans, { previousContentLength }]);
     }
     return base;
-  }, [allowHtml, animated, previousContentLength]);
+  }, [
+    allowHtml,
+    animated,
+    previousContentLength,
+    shouldUsePlainTextMode,
+  ]);
+
+  if (shouldUsePlainTextMode) {
+    return (
+      <div
+        style={{
+          border: '1px solid var(--semi-color-border)',
+          borderRadius: '8px',
+          backgroundColor: 'var(--semi-color-fill-0)',
+          padding: '12px',
+          margin: '8px 0',
+        }}
+      >
+        <div
+          style={{
+            fontSize: '12px',
+            lineHeight: '1.5',
+            marginBottom: '8px',
+            color: 'var(--semi-color-text-2)',
+          }}
+        >
+          {isVeryLargeContent
+            ? '内容超长，已切换为截断纯文本预览模式。'
+            : '内容较长，已切换为纯文本渲染模式以降低内存占用。'}
+        </div>
+        <pre
+          dir='auto'
+          style={{
+            margin: 0,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            overflowX: 'auto',
+            lineHeight: '1.6',
+            fontSize: '14px',
+            fontFamily: 'inherit',
+            color: isUserMessage ? 'white' : 'var(--semi-color-text-0)',
+          }}
+        >
+          {escapedContent}
+        </pre>
+      </div>
+    );
+  }
 
   return (
     <ReactMarkdown

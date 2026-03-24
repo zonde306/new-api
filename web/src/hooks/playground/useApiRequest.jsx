@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SSE } from 'sse.js';
 import {
@@ -32,6 +32,14 @@ import {
   processIncompleteThinkTags,
 } from '../../helpers';
 
+const STREAM_FLUSH_INTERVAL = 80;
+const MAX_DEBUG_SSE_MESSAGES = 200;
+const MAX_DEBUG_RESPONSE_CHARS = 200000;
+const DEBUG_RESPONSE_TRUNCATION_PREFIX =
+  '[... 为避免内存占用过高，较早的流式响应内容已被截断 ...]\n';
+const DEBUG_SSE_TRUNCATION_NOTICE =
+  '[... 为避免内存占用过高，较早的 SSE 消息已被省略 ...]';
+
 export const useApiRequest = (
   setMessage,
   setDebugData,
@@ -40,6 +48,36 @@ export const useApiRequest = (
   saveMessages,
 ) => {
   const { t } = useTranslation();
+  const pendingStreamChunksRef = useRef({ content: '', reasoning: '' });
+  const streamFlushTimerRef = useRef(null);
+
+  const trimDebugResponse = useCallback((content = '') => {
+    if (content.length <= MAX_DEBUG_RESPONSE_CHARS) {
+      return content;
+    }
+    return (
+      DEBUG_RESPONSE_TRUNCATION_PREFIX +
+      content.slice(-MAX_DEBUG_RESPONSE_CHARS)
+    );
+  }, []);
+
+  const appendDebugSSEMessage = useCallback((messages = [], data) => {
+    const baseMessages = Array.isArray(messages) ? messages : [];
+    const hasNotice = baseMessages[0] === DEBUG_SSE_TRUNCATION_NOTICE;
+    const rawMessages = hasNotice ? baseMessages.slice(1) : baseMessages;
+    const nextMessages = [...rawMessages, data];
+
+    if (nextMessages.length <= MAX_DEBUG_SSE_MESSAGES) {
+      return hasNotice
+        ? [DEBUG_SSE_TRUNCATION_NOTICE, ...nextMessages]
+        : nextMessages;
+    }
+
+    return [
+      DEBUG_SSE_TRUNCATION_NOTICE,
+      ...nextMessages.slice(-(MAX_DEBUG_SSE_MESSAGES - 1)),
+    ];
+  }, []);
 
   // 处理消息自动关闭逻辑的公共函数
   const applyAutoCollapseLogic = useCallback(
@@ -83,8 +121,6 @@ export const useApiRequest = (
               isThinkingComplete: false,
             };
           } else if (type === 'content') {
-            const shouldCollapseReasoning =
-              !lastMessage.content && lastMessage.reasoningContent;
             const newContent = (lastMessage.content || '') + textChunk;
 
             let shouldCollapseFromThinkTag = false;
@@ -102,11 +138,10 @@ export const useApiRequest = (
                 thinkCloseMatches.length >= thinkMatches.length
               ) {
                 shouldCollapseFromThinkTag = true;
-                thinkingCompleteFromTags = true; // think标签闭合也标记思考完成
+                thinkingCompleteFromTags = true;
               }
             }
 
-            // 如果开始接收content内容，且之前有reasoning内容，或者think标签已闭合，则标记思考完成
             const isThinkingComplete =
               (lastMessage.reasoningContent &&
                 !lastMessage.isThinkingComplete) ||
@@ -122,6 +157,10 @@ export const useApiRequest = (
               content: newContent,
               status: MESSAGE_STATUS.INCOMPLETE,
               ...autoCollapseState,
+              ...(shouldCollapseFromThinkTag && {
+                isReasoningExpanded: false,
+                hasAutoCollapsed: true,
+              }),
             };
           }
 
@@ -133,6 +172,43 @@ export const useApiRequest = (
     },
     [setMessage, applyAutoCollapseLogic],
   );
+
+  const resetPendingStreamChunks = useCallback(() => {
+    pendingStreamChunksRef.current = { content: '', reasoning: '' };
+    if (streamFlushTimerRef.current) {
+      clearTimeout(streamFlushTimerRef.current);
+      streamFlushTimerRef.current = null;
+    }
+  }, []);
+
+  const flushPendingStreamChunks = useCallback(() => {
+    const pendingChunks = pendingStreamChunksRef.current;
+    resetPendingStreamChunks();
+
+    if (pendingChunks.reasoning) {
+      streamMessageUpdate(pendingChunks.reasoning, 'reasoning');
+    }
+    if (pendingChunks.content) {
+      streamMessageUpdate(pendingChunks.content, 'content');
+    }
+  }, [resetPendingStreamChunks, streamMessageUpdate]);
+
+  const schedulePendingStreamFlush = useCallback(() => {
+    if (streamFlushTimerRef.current) {
+      return;
+    }
+
+    streamFlushTimerRef.current = setTimeout(() => {
+      streamFlushTimerRef.current = null;
+      flushPendingStreamChunks();
+    }, STREAM_FLUSH_INTERVAL);
+  }, [flushPendingStreamChunks]);
+
+  useEffect(() => {
+    return () => {
+      resetPendingStreamChunks();
+    };
+  }, [resetPendingStreamChunks]);
 
   // 完成消息
   const completeMessage = useCallback(
@@ -157,7 +233,6 @@ export const useApiRequest = (
           },
         ];
 
-        // 在消息完成时保存，传入更新后的消息列表
         if (
           status === MESSAGE_STATUS.COMPLETE ||
           status === MESSAGE_STATUS.ERROR
@@ -174,12 +249,14 @@ export const useApiRequest = (
   // 非流式请求
   const handleNonStreamRequest = useCallback(
     async (payload) => {
+      resetPendingStreamChunks();
+
       setDebugData((prev) => ({
         ...prev,
         request: payload,
         timestamp: new Date().toISOString(),
         response: null,
-        sseMessages: null, // 非流式请求清除 SSE 消息
+        sseMessages: null,
         isStreaming: false,
       }));
       setActiveDebugTab(DEBUG_TABS.REQUEST);
@@ -230,8 +307,8 @@ export const useApiRequest = (
 
         if (data.choices?.[0]) {
           const choice = data.choices[0];
-          let content = choice.message?.content || '';
-          let reasoningContent =
+          const content = choice.message?.content || '';
+          const reasoningContent =
             choice.message?.reasoning_content ||
             choice.message?.reasoning ||
             '';
@@ -285,19 +362,28 @@ export const useApiRequest = (
         });
       }
     },
-    [setDebugData, setActiveDebugTab, setMessage, t, applyAutoCollapseLogic],
+    [
+      setDebugData,
+      setActiveDebugTab,
+      setMessage,
+      t,
+      applyAutoCollapseLogic,
+      resetPendingStreamChunks,
+    ],
   );
 
   // SSE请求
   const handleSSE = useCallback(
     (payload) => {
+      resetPendingStreamChunks();
+
       setDebugData((prev) => ({
         ...prev,
         request: payload,
         timestamp: new Date().toISOString(),
         response: null,
-        sseMessages: [], // 新增：存储 SSE 消息数组
-        isStreaming: true, // 新增：标记流式状态
+        sseMessages: [],
+        isStreaming: true,
       }));
       setActiveDebugTab(DEBUG_TABS.REQUEST);
 
@@ -314,17 +400,18 @@ export const useApiRequest = (
 
       let responseData = '';
       let hasReceivedFirstResponse = false;
-      let isStreamComplete = false; // 添加标志位跟踪流是否正常完成
+      let isStreamComplete = false;
 
       source.addEventListener('message', (e) => {
         if (e.data === '[DONE]') {
-          isStreamComplete = true; // 标记流正常完成
+          flushPendingStreamChunks();
+          isStreamComplete = true;
           source.close();
           sseSourceRef.current = null;
           setDebugData((prev) => ({
             ...prev,
             response: responseData,
-            sseMessages: [...(prev.sseMessages || []), '[DONE]'], // 添加 DONE 标记
+            sseMessages: appendDebugSSEMessage(prev.sseMessages, '[DONE]'),
             isStreaming: false,
           }));
           completeMessage();
@@ -332,30 +419,36 @@ export const useApiRequest = (
         }
 
         try {
-          const payload = JSON.parse(e.data);
-          responseData += e.data + '\n';
+          const eventPayload = JSON.parse(e.data);
+          responseData = trimDebugResponse(responseData + e.data + '\n');
 
           if (!hasReceivedFirstResponse) {
             setActiveDebugTab(DEBUG_TABS.RESPONSE);
             hasReceivedFirstResponse = true;
           }
 
-          // 新增：将 SSE 消息添加到数组
           setDebugData((prev) => ({
             ...prev,
-            sseMessages: [...(prev.sseMessages || []), e.data],
+            sseMessages: appendDebugSSEMessage(prev.sseMessages, e.data),
           }));
 
-          const delta = payload.choices?.[0]?.delta;
+          const delta = eventPayload.choices?.[0]?.delta;
           if (delta) {
             if (delta.reasoning_content) {
-              streamMessageUpdate(delta.reasoning_content, 'reasoning');
+              pendingStreamChunksRef.current.reasoning += delta.reasoning_content;
             }
             if (delta.reasoning) {
-              streamMessageUpdate(delta.reasoning, 'reasoning');
+              pendingStreamChunksRef.current.reasoning += delta.reasoning;
             }
             if (delta.content) {
-              streamMessageUpdate(delta.content, 'content');
+              pendingStreamChunksRef.current.content += delta.content;
+            }
+
+            if (
+              pendingStreamChunksRef.current.reasoning ||
+              pendingStreamChunksRef.current.content
+            ) {
+              schedulePendingStreamFlush();
             }
           }
         } catch (error) {
@@ -364,17 +457,18 @@ export const useApiRequest = (
 
           setDebugData((prev) => ({
             ...prev,
-            response: responseData + `\n\nError: ${errorInfo}`,
-            sseMessages: [...(prev.sseMessages || []), e.data], // 即使解析失败也保存原始数据
+            response: trimDebugResponse(
+              responseData + `\n\nError: ${errorInfo}`,
+            ),
+            sseMessages: appendDebugSSEMessage(prev.sseMessages, e.data),
           }));
           setActiveDebugTab(DEBUG_TABS.RESPONSE);
-          // 解析失败时忽略当前消息，继续等待后续流数据
         }
       });
 
       source.addEventListener('error', (e) => {
-        // 只有在流没有正常完成且连接状态异常时才处理错误
         if (!isStreamComplete && source.readyState !== 2) {
+          flushPendingStreamChunks();
           console.error('SSE Error:', e);
           const errorMessage = e.data || t('请求发生错误');
 
@@ -383,10 +477,12 @@ export const useApiRequest = (
 
           setDebugData((prev) => ({
             ...prev,
-            response:
+            response: trimDebugResponse(
               responseData +
-              '\n\nSSE Error:\n' +
-              JSON.stringify(errorInfo, null, 2),
+                '\n\nSSE Error:\n' +
+                JSON.stringify(errorInfo, null, 2),
+            ),
+            isStreaming: false,
           }));
           setActiveDebugTab(DEBUG_TABS.RESPONSE);
 
@@ -398,23 +494,26 @@ export const useApiRequest = (
       });
 
       source.addEventListener('readystatechange', (e) => {
-        // 检查 HTTP 状态错误，但避免与正常关闭重复处理
         if (
           e.readyState >= 2 &&
           source.status !== undefined &&
           source.status !== 200 &&
           !isStreamComplete
         ) {
+          flushPendingStreamChunks();
+
           const errorInfo = handleApiError(new Error('HTTP状态错误'));
           errorInfo.status = source.status;
           errorInfo.readyState = source.readyState;
 
           setDebugData((prev) => ({
             ...prev,
-            response:
+            response: trimDebugResponse(
               responseData +
-              '\n\nHTTP Error:\n' +
-              JSON.stringify(errorInfo, null, 2),
+                '\n\nHTTP Error:\n' +
+                JSON.stringify(errorInfo, null, 2),
+            ),
+            isStreaming: false,
           }));
           setActiveDebugTab(DEBUG_TABS.RESPONSE);
 
@@ -427,12 +526,16 @@ export const useApiRequest = (
       try {
         source.stream();
       } catch (error) {
+        flushPendingStreamChunks();
         console.error('Failed to start SSE stream:', error);
         const errorInfo = handleApiError(error);
 
         setDebugData((prev) => ({
           ...prev,
-          response: 'Stream启动失败:\n' + JSON.stringify(errorInfo, null, 2),
+          response: trimDebugResponse(
+            'Stream启动失败:\n' + JSON.stringify(errorInfo, null, 2),
+          ),
+          isStreaming: false,
         }));
         setActiveDebugTab(DEBUG_TABS.RESPONSE);
 
@@ -446,19 +549,23 @@ export const useApiRequest = (
       streamMessageUpdate,
       completeMessage,
       t,
-      applyAutoCollapseLogic,
+      resetPendingStreamChunks,
+      flushPendingStreamChunks,
+      schedulePendingStreamFlush,
+      trimDebugResponse,
+      appendDebugSSEMessage,
     ],
   );
 
   // 停止生成
   const onStopGenerator = useCallback(() => {
-    // 如果仍有活动的 SSE 连接，首先关闭
+    flushPendingStreamChunks();
+
     if (sseSourceRef.current) {
       sseSourceRef.current.close();
       sseSourceRef.current = null;
     }
 
-    // 无论是否存在 SSE 连接，都尝试处理最后一条正在生成的消息
     setMessage((prevMessage) => {
       if (prevMessage.length === 0) return prevMessage;
       const lastMessage = prevMessage[prevMessage.length - 1];
@@ -485,14 +592,18 @@ export const useApiRequest = (
           },
         ];
 
-        // 停止生成时也保存，传入更新后的消息列表
         setTimeout(() => saveMessages(updatedMessages), 0);
 
         return updatedMessages;
       }
       return prevMessage;
     });
-  }, [setMessage, applyAutoCollapseLogic, saveMessages]);
+  }, [
+    flushPendingStreamChunks,
+    setMessage,
+    applyAutoCollapseLogic,
+    saveMessages,
+  ]);
 
   // 发送请求
   const sendRequest = useCallback(
@@ -513,3 +624,4 @@ export const useApiRequest = (
     completeMessage,
   };
 };
+
