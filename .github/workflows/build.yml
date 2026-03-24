@@ -58,7 +58,7 @@ jobs:
             OUTPUT="dist/new-api-${VERSION}-linux"
           fi
           go mod download
-          go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION'" -o "$OUTPUT"
+          go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o "$OUTPUT"
 
       - name: Upload Backend Artifact
         uses: actions/upload-artifact@v4
