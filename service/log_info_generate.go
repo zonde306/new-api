@@ -81,10 +81,10 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 }
 
 func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
-	if relayInfo == nil || other == nil || len(relayInfo.ParamOverrideAudit) == 0 {
+	if relayInfo == nil || other == nil || len(relayInfo.ParamOverride) == 0 {
 		return
 	}
-	other["po"] = relayInfo.ParamOverrideAudit
+	other["po"] = relayInfo.ParamOverride
 }
 
 func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
