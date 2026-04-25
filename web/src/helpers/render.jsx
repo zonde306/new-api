@@ -56,9 +56,7 @@ import {
   Dify,
   Coze,
   SiliconCloud,
-  FastGPT,
   Kling,
-  Jimeng,
   Perplexity,
   Replicate,
 } from '@lobehub/icons';
@@ -399,15 +397,15 @@ export function getChannelIcon(channelType) {
       return <Coze size={iconSize} />;
     case 50: // 可灵 Kling
       return <Kling.Color size={iconSize} />;
-    case 51: // 即梦 Jimeng
-      return <Jimeng.Color size={iconSize} />;
+    case 51: // 即梦 Jimeng - 使用 Kling 图标作为替代（同属字节跳动视频生成产品）
+      return <Kling.Color size={iconSize} />;
     case 54: // 豆包视频 Doubao Video
       return <Doubao.Color size={iconSize} />;
     case 56: // Replicate
       return <Replicate size={iconSize} />;
     case 8: // 自定义渠道
-    case 22: // 知识库：FastGPT
-      return <FastGPT.Color size={iconSize} />;
+    case 22: // 知识库：FastGPT - 使用 Dify 图标作为替代（同属知识库产品）
+      return <Dify.Color size={iconSize} />;
     case 21: // 知识库：AI Proxy
     case 44: // 嵌入模型：MokaAI M3E
     default:
