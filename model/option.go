@@ -36,7 +36,6 @@ func InitOptionMap() {
 	common.OptionMap["ImageUploadPermission"] = strconv.Itoa(common.ImageUploadPermission)
 	common.OptionMap["ImageDownloadPermission"] = strconv.Itoa(common.ImageDownloadPermission)
 	common.OptionMap["PasswordLoginEnabled"] = strconv.FormatBool(common.PasswordLoginEnabled)
-	common.OptionMap["PasswordLoginAdminOnlyEnabled"] = strconv.FormatBool(common.PasswordLoginAdminOnlyEnabled)
 	common.OptionMap["PasswordRegisterEnabled"] = strconv.FormatBool(common.PasswordRegisterEnabled)
 	common.OptionMap["EmailVerificationEnabled"] = strconv.FormatBool(common.EmailVerificationEnabled)
 	common.OptionMap["GitHubOAuthEnabled"] = strconv.FormatBool(common.GitHubOAuthEnabled)
@@ -70,7 +69,6 @@ func InitOptionMap() {
 	common.OptionMap["Footer"] = common.Footer
 	common.OptionMap["SystemName"] = common.SystemName
 	common.OptionMap["Logo"] = common.Logo
-	common.OptionMap["CustomCSS"] = common.CustomCSS
 	common.OptionMap["ServerAddress"] = ""
 	common.OptionMap["WorkerUrl"] = system_setting.WorkerUrl
 	common.OptionMap["WorkerValidKey"] = system_setting.WorkerValidKey
@@ -92,6 +90,34 @@ func InitOptionMap() {
 	common.OptionMap["CreemProducts"] = setting.CreemProducts
 	common.OptionMap["CreemTestMode"] = strconv.FormatBool(setting.CreemTestMode)
 	common.OptionMap["CreemWebhookSecret"] = setting.CreemWebhookSecret
+	common.OptionMap["WaffoEnabled"] = strconv.FormatBool(setting.WaffoEnabled)
+	common.OptionMap["WaffoApiKey"] = setting.WaffoApiKey
+	common.OptionMap["WaffoPrivateKey"] = setting.WaffoPrivateKey
+	common.OptionMap["WaffoPublicCert"] = setting.WaffoPublicCert
+	common.OptionMap["WaffoSandboxPublicCert"] = setting.WaffoSandboxPublicCert
+	common.OptionMap["WaffoSandboxApiKey"] = setting.WaffoSandboxApiKey
+	common.OptionMap["WaffoSandboxPrivateKey"] = setting.WaffoSandboxPrivateKey
+	common.OptionMap["WaffoSandbox"] = strconv.FormatBool(setting.WaffoSandbox)
+	common.OptionMap["WaffoMerchantId"] = setting.WaffoMerchantId
+	common.OptionMap["WaffoNotifyUrl"] = setting.WaffoNotifyUrl
+	common.OptionMap["WaffoReturnUrl"] = setting.WaffoReturnUrl
+	common.OptionMap["WaffoSubscriptionReturnUrl"] = setting.WaffoSubscriptionReturnUrl
+	common.OptionMap["WaffoCurrency"] = setting.WaffoCurrency
+	common.OptionMap["WaffoUnitPrice"] = strconv.FormatFloat(setting.WaffoUnitPrice, 'f', -1, 64)
+	common.OptionMap["WaffoMinTopUp"] = strconv.Itoa(setting.WaffoMinTopUp)
+	common.OptionMap["WaffoPayMethods"] = setting.WaffoPayMethods2JsonString()
+	common.OptionMap["WaffoPancakeEnabled"] = strconv.FormatBool(setting.WaffoPancakeEnabled)
+	common.OptionMap["WaffoPancakeSandbox"] = strconv.FormatBool(setting.WaffoPancakeSandbox)
+	common.OptionMap["WaffoPancakeMerchantID"] = setting.WaffoPancakeMerchantID
+	common.OptionMap["WaffoPancakePrivateKey"] = setting.WaffoPancakePrivateKey
+	common.OptionMap["WaffoPancakeWebhookPublicKey"] = setting.WaffoPancakeWebhookPublicKey
+	common.OptionMap["WaffoPancakeWebhookTestKey"] = setting.WaffoPancakeWebhookTestKey
+	common.OptionMap["WaffoPancakeStoreID"] = setting.WaffoPancakeStoreID
+	common.OptionMap["WaffoPancakeProductID"] = setting.WaffoPancakeProductID
+	common.OptionMap["WaffoPancakeReturnURL"] = setting.WaffoPancakeReturnURL
+	common.OptionMap["WaffoPancakeCurrency"] = setting.WaffoPancakeCurrency
+	common.OptionMap["WaffoPancakeUnitPrice"] = strconv.FormatFloat(setting.WaffoPancakeUnitPrice, 'f', -1, 64)
+	common.OptionMap["WaffoPancakeMinTopUp"] = strconv.Itoa(setting.WaffoPancakeMinTopUp)
 	common.OptionMap["TopupGroupRatio"] = common.TopupGroupRatio2JSONString()
 	common.OptionMap["Chats"] = setting.Chats2JsonString()
 	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
@@ -115,11 +141,6 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestRateLimitDurationMinutes)
 	common.OptionMap["ModelRequestRateLimitSuccessCount"] = strconv.Itoa(setting.ModelRequestRateLimitSuccessCount)
 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
-	common.OptionMap["ModelRequestIPRateLimitEnabled"] = strconv.FormatBool(setting.ModelRequestIPRateLimitEnabled)
-	common.OptionMap["ModelRequestIPRateLimitDurationMinutes"] = strconv.Itoa(setting.ModelRequestIPRateLimitDurationMinutes)
-	common.OptionMap["ModelRequestIPRateLimitUserCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitUserCount)
-	common.OptionMap["ModelRequestIPRateLimitUserSuccessCount"] = strconv.Itoa(setting.ModelRequestIPRateLimitUserSuccessCount)
-	common.OptionMap["ModelRequestIPRateLimitGroup"] = setting.ModelRequestIPRateLimitGroup2JSONString()
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
@@ -232,8 +253,6 @@ func updateOptionMap(key string, value string) (err error) {
 			common.PasswordRegisterEnabled = boolValue
 		case "PasswordLoginEnabled":
 			common.PasswordLoginEnabled = boolValue
-		case "PasswordLoginAdminOnlyEnabled":
-			common.PasswordLoginAdminOnlyEnabled = boolValue
 		case "EmailVerificationEnabled":
 			common.EmailVerificationEnabled = boolValue
 		case "GitHubOAuthEnabled":
@@ -298,8 +317,6 @@ func updateOptionMap(key string, value string) (err error) {
 			setting.CheckSensitiveOnPromptEnabled = boolValue
 		case "ModelRequestRateLimitEnabled":
 			setting.ModelRequestRateLimitEnabled = boolValue
-		case "ModelRequestIPRateLimitEnabled":
-			setting.ModelRequestIPRateLimitEnabled = boolValue
 		case "StopOnSensitiveEnabled":
 			setting.StopOnSensitiveEnabled = boolValue
 		case "SMTPSSLEnabled":
@@ -372,6 +389,60 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.CreemTestMode = value == "true"
 	case "CreemWebhookSecret":
 		setting.CreemWebhookSecret = value
+	case "WaffoEnabled":
+		setting.WaffoEnabled = value == "true"
+	case "WaffoApiKey":
+		setting.WaffoApiKey = value
+	case "WaffoPrivateKey":
+		setting.WaffoPrivateKey = value
+	case "WaffoPublicCert":
+		setting.WaffoPublicCert = value
+	case "WaffoSandboxPublicCert":
+		setting.WaffoSandboxPublicCert = value
+	case "WaffoSandboxApiKey":
+		setting.WaffoSandboxApiKey = value
+	case "WaffoSandboxPrivateKey":
+		setting.WaffoSandboxPrivateKey = value
+	case "WaffoSandbox":
+		setting.WaffoSandbox = value == "true"
+	case "WaffoMerchantId":
+		setting.WaffoMerchantId = value
+	case "WaffoNotifyUrl":
+		setting.WaffoNotifyUrl = value
+	case "WaffoReturnUrl":
+		setting.WaffoReturnUrl = value
+	case "WaffoSubscriptionReturnUrl":
+		setting.WaffoSubscriptionReturnUrl = value
+	case "WaffoCurrency":
+		setting.WaffoCurrency = value
+	case "WaffoUnitPrice":
+		setting.WaffoUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "WaffoMinTopUp":
+		setting.WaffoMinTopUp, _ = strconv.Atoi(value)
+	case "WaffoPancakeEnabled":
+		setting.WaffoPancakeEnabled = value == "true"
+	case "WaffoPancakeSandbox":
+		setting.WaffoPancakeSandbox = value == "true"
+	case "WaffoPancakeMerchantID":
+		setting.WaffoPancakeMerchantID = value
+	case "WaffoPancakePrivateKey":
+		setting.WaffoPancakePrivateKey = value
+	case "WaffoPancakeWebhookPublicKey":
+		setting.WaffoPancakeWebhookPublicKey = value
+	case "WaffoPancakeWebhookTestKey":
+		setting.WaffoPancakeWebhookTestKey = value
+	case "WaffoPancakeStoreID":
+		setting.WaffoPancakeStoreID = value
+	case "WaffoPancakeProductID":
+		setting.WaffoPancakeProductID = value
+	case "WaffoPancakeReturnURL":
+		setting.WaffoPancakeReturnURL = value
+	case "WaffoPancakeCurrency":
+		setting.WaffoPancakeCurrency = value
+	case "WaffoPancakeUnitPrice":
+		setting.WaffoPancakeUnitPrice, _ = strconv.ParseFloat(value, 64)
+	case "WaffoPancakeMinTopUp":
+		setting.WaffoPancakeMinTopUp, _ = strconv.Atoi(value)
 	case "TopupGroupRatio":
 		err = common.UpdateTopupGroupRatioByJSONString(value)
 	case "GitHubClientId":
@@ -390,8 +461,6 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SystemName = value
 	case "Logo":
 		common.Logo = value
-	case "CustomCSS":
-		common.CustomCSS = value
 	case "WeChatServerAddress":
 		common.WeChatServerAddress = value
 	case "WeChatServerToken":
@@ -424,14 +493,6 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.ModelRequestRateLimitSuccessCount, _ = strconv.Atoi(value)
 	case "ModelRequestRateLimitGroup":
 		err = setting.UpdateModelRequestRateLimitGroupByJSONString(value)
-	case "ModelRequestIPRateLimitDurationMinutes":
-		setting.ModelRequestIPRateLimitDurationMinutes, _ = strconv.Atoi(value)
-	case "ModelRequestIPRateLimitUserCount":
-		setting.ModelRequestIPRateLimitUserCount, _ = strconv.Atoi(value)
-	case "ModelRequestIPRateLimitUserSuccessCount":
-		setting.ModelRequestIPRateLimitUserSuccessCount, _ = strconv.Atoi(value)
-	case "ModelRequestIPRateLimitGroup":
-		err = setting.UpdateModelRequestIPRateLimitGroupByJSONString(value)
 	case "RetryTimes":
 		common.RetryTimes, _ = strconv.Atoi(value)
 	case "DataExportInterval":
@@ -482,6 +543,10 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.StreamCacheQueueLength, _ = strconv.Atoi(value)
 	case "PayMethods":
 		err = operation_setting.UpdatePayMethodsByJsonString(value)
+	case "WaffoPayMethods":
+		// WaffoPayMethods is read directly from OptionMap via setting.GetWaffoPayMethods().
+		// The value is already stored in OptionMap at the top of this function (line: common.OptionMap[key] = value).
+		// No additional in-memory variable to update.
 	}
 	return err
 }
@@ -510,8 +575,12 @@ func handleConfigUpdate(key, value string) bool {
 
 	// 特定配置的后处理
 	if configName == "performance_setting" {
-		// 同步磁盘缓存配置到 common 包
 		performance_setting.UpdateAndSync()
+	} else if configName == "tool_price_setting" {
+		operation_setting.RebuildToolPriceIndex()
+	} else if configName == "billing_setting" {
+		InvalidatePricingCache()
+		ratio_setting.InvalidateExposedDataCache()
 	}
 
 	return true // 已处理

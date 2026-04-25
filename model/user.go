@@ -222,7 +222,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
-func SearchUsers(keyword string, group string, bindingStatus string, startIdx int, num int) ([]*User, int64, error) {
+func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
 	var users []*User
 	var total int64
 	var err error
@@ -265,28 +265,6 @@ func SearchUsers(keyword string, group string, bindingStatus string, startIdx in
 			query = query.Where(likeCondition,
 				"%"+keyword+"%", "%"+keyword+"%", "%"+keyword+"%")
 		}
-	}
-
-	// 第三方账户绑定状态过滤（不包含邮箱），支持：bound/unbound/1/0/true/false/已绑定/未绑定
-	// 使用子查询聚合各第三方来源（内置字段 + 自定义 OAuth 绑定表），降低多列 OR 条件对查询性能的影响
-	boundUserIDSubQuery := "SELECT id FROM users WHERE github_id IS NOT NULL AND github_id <> '' " +
-		"UNION SELECT id FROM users WHERE discord_id IS NOT NULL AND discord_id <> '' " +
-		"UNION SELECT id FROM users WHERE oidc_id IS NOT NULL AND oidc_id <> '' " +
-		"UNION SELECT id FROM users WHERE wechat_id IS NOT NULL AND wechat_id <> '' " +
-		"UNION SELECT id FROM users WHERE telegram_id IS NOT NULL AND telegram_id <> '' " +
-		"UNION SELECT id FROM users WHERE linux_do_id IS NOT NULL AND linux_do_id <> '' " +
-		"UNION SELECT user_id AS id FROM user_oauth_bindings"
-
-	bindingStatus = strings.TrimSpace(strings.ToLower(bindingStatus))
-	switch bindingStatus {
-	case "", "all":
-		// no-op
-	case "1", "true", "yes", "bound", "绑定", "已绑定":
-		query = query.Where("id IN (" + boundUserIDSubQuery + ")")
-	case "0", "false", "no", "unbound", "未绑定":
-		query = query.Where("id NOT IN (" + boundUserIDSubQuery + ")")
-	default:
-		// ignore invalid values
 	}
 
 	// 获取总数
@@ -545,7 +523,6 @@ func (user *User) Edit(updatePassword bool) error {
 		"username":     newUser.Username,
 		"display_name": newUser.DisplayName,
 		"group":        newUser.Group,
-		"quota":        newUser.Quota,
 		"remark":       newUser.Remark,
 	}
 	if updatePassword {
@@ -620,13 +597,19 @@ func (user *User) ValidateAndFill() (err error) {
 	password := user.Password
 	username := strings.TrimSpace(user.Username)
 	if username == "" || password == "" {
-		return errors.New("用户名或密码为空")
+		return ErrUserEmptyCredentials
 	}
-	// find buy username or email
-	DB.Where("username = ? OR email = ?", username, username).First(user)
+	// find by username or email
+	err = DB.Where("username = ? OR email = ?", username, username).First(user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrInvalidCredentials
+		}
+		return fmt.Errorf("%w: %v", ErrDatabase, err)
+	}
 	okay := common.ValidatePasswordAndHash(password, user.Password)
 	if !okay || user.Status != common.UserStatusEnabled {
-		return errors.New("用户名或密码错误，或用户已被封禁")
+		return ErrInvalidCredentials
 	}
 	return nil
 }
@@ -777,16 +760,20 @@ func IsAdmin(userId int) bool {
 //	return user.Status == common.UserStatusEnabled, nil
 //}
 
-func ValidateAccessToken(token string) (user *User) {
+func ValidateAccessToken(token string) (*User, error) {
 	if token == "" {
-		return nil
+		return nil, nil
 	}
 	token = strings.Replace(token, "Bearer ", "", 1)
-	user = &User{}
-	if DB.Where("access_token = ?", token).First(user).RowsAffected == 1 {
-		return user
+	user := &User{}
+	err := DB.Where("access_token = ?", token).First(user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
 	}
-	return nil
+	return user, nil
 }
 
 // GetUserQuota gets quota from Redis first, falls back to DB if needed
@@ -897,27 +884,17 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
-	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
-		gopool.Go(func() {
-			err := cacheIncrUserQuota(id, int64(quota))
-			if err != nil {
-				common.SysLog("failed to increase user quota: " + err.Error())
-			}
-		})
-		return nil
-	}
-	if err = increaseUserQuota(id, quota); err != nil {
-		deleteUserBaseLocalCache(id)
-		return err
-	}
 	gopool.Go(func() {
 		err := cacheIncrUserQuota(id, int64(quota))
 		if err != nil {
 			common.SysLog("failed to increase user quota: " + err.Error())
 		}
 	})
-	return nil
+	if !db && common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
+		return nil
+	}
+	return increaseUserQuota(id, quota)
 }
 
 func increaseUserQuota(id int, quota int) (err error) {
@@ -928,23 +905,9 @@ func increaseUserQuota(id int, quota int) (err error) {
 	return err
 }
 
-func DecreaseUserQuota(id int, quota int) (err error) {
+func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
-	}
-	if common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
-		gopool.Go(func() {
-			err := cacheDecrUserQuota(id, int64(quota))
-			if err != nil {
-				common.SysLog("failed to decrease user quota: " + err.Error())
-			}
-		})
-		return nil
-	}
-	if err = decreaseUserQuota(id, quota); err != nil {
-		deleteUserBaseLocalCache(id)
-		return err
 	}
 	gopool.Go(func() {
 		err := cacheDecrUserQuota(id, int64(quota))
@@ -952,7 +915,11 @@ func DecreaseUserQuota(id int, quota int) (err error) {
 			common.SysLog("failed to decrease user quota: " + err.Error())
 		}
 	})
-	return nil
+	if !db && common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeUserQuota, id, -quota)
+		return nil
+	}
+	return decreaseUserQuota(id, quota)
 }
 
 func decreaseUserQuota(id int, quota int) (err error) {
@@ -970,7 +937,7 @@ func DeltaUpdateUserQuota(id int, delta int) (err error) {
 	if delta > 0 {
 		return IncreaseUserQuota(id, delta, false)
 	} else {
-		return DecreaseUserQuota(id, -delta)
+		return DecreaseUserQuota(id, -delta, false)
 	}
 }
 
@@ -986,13 +953,14 @@ func GetRootUser() (user *User) {
 
 func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 	if common.BatchUpdateEnabled {
-		addNewUserUsedQuotaAndRequestCountRecord(id, quota, 1)
+		addNewRecord(BatchUpdateTypeUsedQuota, id, quota)
+		addNewRecord(BatchUpdateTypeRequestCount, id, 1)
 		return
 	}
-	_ = updateUserUsedQuotaAndRequestCount(id, quota, 1)
+	updateUserUsedQuotaAndRequestCount(id, quota, 1)
 }
 
-func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) error {
+func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
@@ -1001,17 +969,16 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) error {
 	).Error
 	if err != nil {
 		common.SysLog("failed to update user used quota and request count: " + err.Error())
-		return err
+		return
 	}
 
 	//// 更新缓存
 	//if err := invalidateUserCache(id); err != nil {
 	//	common.SysError("failed to invalidate user cache: " + err.Error())
 	//}
-	return nil
 }
 
-func updateUserUsedQuota(id int, quota int) error {
+func updateUserUsedQuota(id int, quota int) {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"used_quota": gorm.Expr("used_quota + ?", quota),
@@ -1019,18 +986,14 @@ func updateUserUsedQuota(id int, quota int) error {
 	).Error
 	if err != nil {
 		common.SysLog("failed to update user used quota: " + err.Error())
-		return err
 	}
-	return nil
 }
 
-func updateUserRequestCount(id int, count int) error {
+func updateUserRequestCount(id int, count int) {
 	err := DB.Model(&User{}).Where("id = ?", id).Update("request_count", gorm.Expr("request_count + ?", count)).Error
 	if err != nil {
 		common.SysLog("failed to update user request count: " + err.Error())
-		return err
 	}
-	return nil
 }
 
 // GetUsernameById gets username from Redis first, falls back to DB if needed
