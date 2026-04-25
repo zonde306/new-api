@@ -159,6 +159,9 @@ type RelayInfo struct {
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 
+	// ParamOverrideAudit records audit logs for param override operations.
+	ParamOverrideAudit []string
+
 	Request dto.Request
 
 	// RequestConversionChain records request format conversions in order, e.g.

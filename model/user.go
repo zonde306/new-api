@@ -222,7 +222,7 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
-func SearchUsers(keyword string, group string, startIdx int, num int) ([]*User, int64, error) {
+func SearchUsers(keyword string, group string, bindingStatus string, startIdx int, num int) ([]*User, int64, error) {
 	var users []*User
 	var total int64
 	var err error
@@ -960,7 +960,7 @@ func UpdateUserUsedQuotaAndRequestCount(id int, quota int) {
 	updateUserUsedQuotaAndRequestCount(id, quota, 1)
 }
 
-func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
+func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) error {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"used_quota":    gorm.Expr("used_quota + ?", quota),
@@ -969,16 +969,17 @@ func updateUserUsedQuotaAndRequestCount(id int, quota int, count int) {
 	).Error
 	if err != nil {
 		common.SysLog("failed to update user used quota and request count: " + err.Error())
-		return
+		return err
 	}
 
 	//// 更新缓存
 	//if err := invalidateUserCache(id); err != nil {
 	//	common.SysError("failed to invalidate user cache: " + err.Error())
 	//}
+	return nil
 }
 
-func updateUserUsedQuota(id int, quota int) {
+func updateUserUsedQuota(id int, quota int) error {
 	err := DB.Model(&User{}).Where("id = ?", id).Updates(
 		map[string]interface{}{
 			"used_quota": gorm.Expr("used_quota + ?", quota),
@@ -986,14 +987,18 @@ func updateUserUsedQuota(id int, quota int) {
 	).Error
 	if err != nil {
 		common.SysLog("failed to update user used quota: " + err.Error())
+		return err
 	}
+	return nil
 }
 
-func updateUserRequestCount(id int, count int) {
+func updateUserRequestCount(id int, count int) error {
 	err := DB.Model(&User{}).Where("id = ?", id).Update("request_count", gorm.Expr("request_count + ?", count)).Error
 	if err != nil {
 		common.SysLog("failed to update user request count: " + err.Error())
+		return err
 	}
+	return nil
 }
 
 // GetUsernameById gets username from Redis first, falls back to DB if needed
