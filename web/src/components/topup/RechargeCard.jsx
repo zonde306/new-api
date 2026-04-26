@@ -669,6 +669,7 @@ const RechargeCard = ({
                 activeSubscriptions={activeSubscriptions}
                 allSubscriptions={allSubscriptions}
                 reloadSubscriptionSelf={reloadSubscriptionSelf}
+                userState={userState}
                 withCard={false}
               />
             </div>
