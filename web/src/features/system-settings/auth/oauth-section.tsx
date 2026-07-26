@@ -38,6 +38,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
@@ -69,6 +70,7 @@ const oauthSchema = z.object({
     enabled: z.boolean(),
     client_id: z.string(),
     client_secret: z.string(),
+    guilds: z.string(),
   }),
   oidc: z.object({
     enabled: z.boolean(),
@@ -101,6 +103,7 @@ type FlatOAuthDefaults = {
   'discord.enabled': boolean
   'discord.client_id': string
   'discord.client_secret': string
+  'discord.guilds': string
   'oidc.enabled': boolean
   'oidc.client_id': string
   'oidc.client_secret': string
@@ -181,6 +184,7 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
     enabled: defaults['discord.enabled'],
     client_id: defaults['discord.client_id'] ?? '',
     client_secret: defaults['discord.client_secret'] ?? '',
+    guilds: defaults['discord.guilds'] ?? '',
   },
   oidc: {
     enabled: defaults['oidc.enabled'],
@@ -211,6 +215,7 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   'discord.enabled': values.discord.enabled,
   'discord.client_id': values.discord.client_id,
   'discord.client_secret': values.discord.client_secret,
+  'discord.guilds': values.discord.guilds,
   'oidc.enabled': values.oidc.enabled,
   'oidc.client_id': values.oidc.client_id,
   'oidc.client_secret': values.oidc.client_secret,
@@ -559,6 +564,35 @@ export function OAuthSection(props: OAuthSectionProps) {
                           ref={field.ref}
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='discord.guilds'
+                  render={({ field }) => (
+                    <FormItem className='lg:col-span-2'>
+                      <FormLabel>{t('Discord guild access rule')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder='{"+guild_id_1": ["+role_id_a", "role_id_b"], "guild_id_2": [], "-guild_id_3": []}'
+                          rows={4}
+                          value={field.value ?? ''}
+                          onChange={(event) =>
+                            field.onChange(event.target.value)
+                          }
+                          name={field.name}
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'JSON mapping of guild IDs to role IDs. Prefix + means required, - means forbidden, no prefix means at least one must match. Empty value disables the restriction.'
+                        )}
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}

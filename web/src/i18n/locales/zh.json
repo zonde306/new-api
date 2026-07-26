@@ -1388,6 +1388,8 @@
     "Disabling...": "禁用中...",
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "免责声明：仅限个人使用，请勿分发或共享任何凭证。该渠道存在前置条件与使用门槛，请在充分了解流程与风险后使用，并遵守 OpenAI 的相关条款与政策。相关凭证与配置仅限接入 Codex CLI 使用，不适用于其他客户端、平台或渠道。",
     "Discord": "Discord",
+    "Discord guild access rule": "Discord 服务器准入规则",
+    "JSON mapping of guild IDs to role IDs. Prefix + means required, - means forbidden, no prefix means at least one must match. Empty value disables the restriction.": "JSON 格式：服务器 ID 映射到身份组 ID 列表。前缀 + 表示必须满足，- 表示必须不满足，无前缀表示至少满足一个。留空表示不限制。",
     "Discount": "优惠",
     "Discount map by recharge amount (JSON object)": "按充值金额的折扣映射 (JSON 对象)",
     "Discount Rate": "折扣率",

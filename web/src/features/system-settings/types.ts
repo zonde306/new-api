@@ -135,6 +135,7 @@ export type AuthSettings = {
   'discord.enabled': boolean
   'discord.client_id': string
   'discord.client_secret': string
+  'discord.guilds': string
   'oidc.enabled': boolean
   'oidc.client_id': string
   'oidc.client_secret': string

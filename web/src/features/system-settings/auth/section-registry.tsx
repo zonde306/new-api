@@ -55,6 +55,7 @@ const AUTH_SECTIONS = [
           'discord.enabled': settings['discord.enabled'],
           'discord.client_id': settings['discord.client_id'],
           'discord.client_secret': settings['discord.client_secret'],
+          'discord.guilds': settings['discord.guilds'],
           'oidc.enabled': settings['oidc.enabled'],
           'oidc.client_id': settings['oidc.client_id'],
           'oidc.client_secret': settings['oidc.client_secret'],

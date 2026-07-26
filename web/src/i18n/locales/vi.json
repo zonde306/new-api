@@ -1388,6 +1388,8 @@
     "Disabling...": "Đang vô hiệu hóa...",
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "Tuyên bố miễn trừ: Chỉ dùng cho mục đích cá nhân. Không phân phối hoặc chia sẻ bất kỳ thông tin xác thực nào. Kênh này có điều kiện tiên quyết và yêu cầu thiết lập trước; chỉ sử dụng khi bạn hiểu rõ quy trình và rủi ro, và tuân thủ điều khoản và chính sách của OpenAI. Thông tin xác thực và cấu hình chỉ dành cho tích hợp Codex CLI, không áp dụng cho các client, nền tảng hoặc kênh khác.",
     "Discord": "Discord",
+    "Discord guild access rule": "Quy tắc truy cập máy chủ Discord",
+    "JSON mapping of guild IDs to role IDs. Prefix + means required, - means forbidden, no prefix means at least one must match. Empty value disables the restriction.": "Ánh xạ JSON từ ID máy chủ sang danh sách ID vai trò. Tiền tố + là bắt buộc, - là cấm, không có tiền tố nghĩa là phải khớp ít nhất một. Để trống để tắt hạn chế.",
     "Discount": "Giảm giá",
     "Discount map by recharge amount (JSON object)": "Ánh xạ giảm giá theo số tiền nạp (đối tượng JSON)",
     "Discount Rate": "Tỷ lệ chiết khấu",
