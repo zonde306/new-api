@@ -44,9 +44,9 @@ func (r *GeminiChatRequest) UnmarshalJSON(data []byte) error {
 }
 
 type ToolConfig struct {
-	FunctionCallingConfig *FunctionCallingConfig `json:"functionCallingConfig,omitempty"`
-	RetrievalConfig       *RetrievalConfig       `json:"retrievalConfig,omitempty"`
-	IncludeServerSideToolInvocations *bool       `json:"includeServerSideToolInvocations,omitempty"`
+	FunctionCallingConfig            *FunctionCallingConfig `json:"functionCallingConfig,omitempty"`
+	RetrievalConfig                  *RetrievalConfig       `json:"retrievalConfig,omitempty"`
+	IncludeServerSideToolInvocations *bool                  `json:"includeServerSideToolInvocations,omitempty"`
 }
 
 type FunctionCallingConfig struct {
@@ -455,26 +455,37 @@ type GeminiChatPromptFeedback struct {
 }
 
 type GeminiChatResponse struct {
-	Candidates     []GeminiChatCandidate     `json:"candidates"`
-	PromptFeedback *GeminiChatPromptFeedback `json:"promptFeedback,omitempty"`
-	UsageMetadata  GeminiUsageMetadata       `json:"usageMetadata"`
+	Candidates       []GeminiChatCandidate     `json:"candidates"`
+	PromptFeedback   *GeminiChatPromptFeedback `json:"promptFeedback,omitempty"`
+	UsageMetadata    GeminiUsageMetadata       `json:"usageMetadata"`
+	HasUsageMetadata bool                      `json:"-"`
 }
 
-// UnmarshalJSON 兼容 Gemini 在安全拦截场景下返回 object/null 的 candidates 字段。
+// UnmarshalJSON records whether Gemini returned usageMetadata while preserving
+// the historical wire shape that always marshals the usageMetadata field.
+// 同时兼容 Gemini 在安全拦截场景下返回 object/null 的 candidates 字段。
 // 某些情况下上游会返回非数组 candidates，若直接反序列化会报错并被误判为 500。
+//
+// IMPORTANT: aux shadows GeminiChatResponse. Any field added to
+// GeminiChatResponse must also be added to aux (and copied below), otherwise it
+// is silently dropped during unmarshal.
 func (r *GeminiChatResponse) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		CandidatesRaw  json.RawMessage           `json:"candidates"`
 		PromptFeedback *GeminiChatPromptFeedback `json:"promptFeedback,omitempty"`
-		UsageMetadata  GeminiUsageMetadata       `json:"usageMetadata"`
+		UsageMetadata  *GeminiUsageMetadata      `json:"usageMetadata"`
 	}
-
 	if err := common.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 
 	r.PromptFeedback = aux.PromptFeedback
-	r.UsageMetadata = aux.UsageMetadata
+	r.HasUsageMetadata = aux.UsageMetadata != nil
+	if aux.UsageMetadata != nil {
+		r.UsageMetadata = *aux.UsageMetadata
+	} else {
+		r.UsageMetadata = GeminiUsageMetadata{}
+	}
 
 	if len(aux.CandidatesRaw) == 0 {
 		r.Candidates = nil
@@ -486,12 +497,20 @@ func (r *GeminiChatResponse) UnmarshalJSON(data []byte) error {
 		if err := common.Unmarshal(aux.CandidatesRaw, &r.Candidates); err != nil {
 			return err
 		}
-	case "object", "null":
-		r.Candidates = []GeminiChatCandidate{}
-	default:
+	default: // object, null, or anything else
 		r.Candidates = []GeminiChatCandidate{}
 	}
 
+	return nil
+}
+
+func (r *GeminiChatResponse) GetUsageMetadata() *GeminiUsageMetadata {
+	if r == nil {
+		return nil
+	}
+	if r.HasUsageMetadata || HasGeminiUsageMetadataTokens(&r.UsageMetadata) {
+		return &r.UsageMetadata
+	}
 	return nil
 }
 
@@ -505,6 +524,7 @@ type GeminiUsageMetadata struct {
 	PromptTokensDetails        []GeminiPromptTokensDetails `json:"promptTokensDetails"`
 	ToolUsePromptTokensDetails []GeminiPromptTokensDetails `json:"toolUsePromptTokensDetails"`
 	CandidatesTokensDetails    []GeminiPromptTokensDetails `json:"candidatesTokensDetails"`
+	BillingUsage               *BillingUsage               `json:"billing_usage,omitempty"`
 }
 
 type GeminiPromptTokensDetails struct {

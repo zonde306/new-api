@@ -96,7 +96,7 @@ func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total 
 	return redemptions, total, nil
 }
 
-func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
+func SearchRedemptions(keyword string, status string, startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
 	tx := DB.Begin()
 	if tx.Error != nil {
 		return nil, 0, tx.Error
@@ -107,14 +107,36 @@ func SearchRedemptions(keyword string, startIdx int, num int) (redemptions []*Re
 		}
 	}()
 
-	// Build query based on keyword type
 	query := tx.Model(&Redemption{})
 
-	// Only try to convert to ID if the string represents a valid integer
-	if id, err := strconv.Atoi(keyword); err == nil {
-		query = query.Where("id = ? OR name LIKE ?", id, keyword+"%")
-	} else {
-		query = query.Where("name LIKE ?", keyword+"%")
+	if keyword != "" {
+		if id, err := strconv.Atoi(keyword); err == nil {
+			query = query.Where("id = ? OR name LIKE ?", id, keyword+"%")
+		} else {
+			query = query.Where("name LIKE ?", keyword+"%")
+		}
+	}
+
+	if status != "" {
+		now := common.GetTimestamp()
+		switch status {
+		case "expired":
+			query = query.Where(
+				"status = ? AND expired_time != 0 AND expired_time < ?",
+				common.RedemptionCodeStatusEnabled,
+				now,
+			)
+		case strconv.Itoa(common.RedemptionCodeStatusEnabled):
+			query = query.Where(
+				"status = ? AND (expired_time = 0 OR expired_time >= ?)",
+				common.RedemptionCodeStatusEnabled,
+				now,
+			)
+		case strconv.Itoa(common.RedemptionCodeStatusDisabled):
+			query = query.Where("status = ?", common.RedemptionCodeStatusDisabled)
+		case strconv.Itoa(common.RedemptionCodeStatusUsed):
+			query = query.Where("status = ?", common.RedemptionCodeStatusUsed)
+		}
 	}
 
 	// Get total count
@@ -162,12 +184,12 @@ func Redeem(key string, userId int) (quota int, err error) {
 	redemption := &Redemption{}
 
 	keyCol := "`key`"
-	if common.UsingPostgreSQL {
+	if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		keyCol = `"key"`
 	}
 	common.RandomSleep()
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		err := tx.Set("gorm:query_option", "FOR UPDATE").Where(keyCol+" = ?", key).First(redemption).Error
+		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return errors.New(i18n.MsgRedemptionInvalid)

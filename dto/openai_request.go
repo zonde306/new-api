@@ -213,12 +213,22 @@ func (r *GeneralOpenAIRequest) ToMap() map[string]any {
 	return result
 }
 
+func IsOpenAIReasoningOModel(modelName string) bool {
+	return strings.HasPrefix(modelName, "o1") ||
+		strings.HasPrefix(modelName, "o3") ||
+		strings.HasPrefix(modelName, "o4")
+}
+
+func IsOpenAIGPT5Model(modelName string) bool {
+	return strings.HasPrefix(modelName, "gpt-5")
+}
+
 func (r *GeneralOpenAIRequest) GetSystemRoleName() string {
-	if strings.HasPrefix(r.Model, "o") {
+	if IsOpenAIReasoningOModel(r.Model) {
 		if !strings.HasPrefix(r.Model, "o1-mini") && !strings.HasPrefix(r.Model, "o1-preview") {
 			return "developer"
 		}
-	} else if strings.HasPrefix(r.Model, "gpt-5") {
+	} else if IsOpenAIGPT5Model(r.Model) {
 		return "developer"
 	}
 	return "system"
@@ -279,8 +289,8 @@ type Message struct {
 	Content          any             `json:"content"`
 	Name             *string         `json:"name,omitempty"`
 	Prefix           *bool           `json:"prefix,omitempty"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	Reasoning        string          `json:"reasoning,omitempty"`
+	ReasoningContent *string         `json:"reasoning_content,omitempty"`
+	Reasoning        *string         `json:"reasoning,omitempty"`
 	ToolCalls        json.RawMessage `json:"tool_calls,omitempty"`
 	ToolCallId       string          `json:"tool_call_id,omitempty"`
 	parsedContent    []MediaContent
@@ -430,6 +440,16 @@ const (
 	ContentTypeVideoUrl   = "video_url" // 阿里百炼视频识别
 	//ContentTypeAudioUrl   = "audio_url"
 )
+
+func (m *Message) GetReasoningContent() string {
+	if m.ReasoningContent == nil && m.Reasoning == nil {
+		return ""
+	}
+	if m.ReasoningContent != nil {
+		return *m.ReasoningContent
+	}
+	return *m.Reasoning
+}
 
 func (m *Message) GetPrefix() bool {
 	if m.Prefix == nil {
@@ -829,6 +849,7 @@ type OpenAIResponsesRequest struct {
 	MaxOutputTokens    *uint           `json:"max_output_tokens,omitempty"`
 	TopLogProbs        *int            `json:"top_logprobs,omitempty"`
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
+	Moderation         json.RawMessage `json:"moderation,omitempty"`
 	ParallelToolCalls  json.RawMessage `json:"parallel_tool_calls,omitempty"`
 	PreviousResponseID string          `json:"previous_response_id,omitempty"`
 	Reasoning          *Reasoning      `json:"reasoning,omitempty"`
@@ -839,6 +860,7 @@ type OpenAIResponsesRequest struct {
 	// This field is allowed by default and can be disabled via channel setting disable_store.
 	Store                json.RawMessage `json:"store,omitempty"`
 	PromptCacheKey       json.RawMessage `json:"prompt_cache_key,omitempty"`
+	PromptCacheOptions   json.RawMessage `json:"prompt_cache_options,omitempty"`
 	PromptCacheRetention json.RawMessage `json:"prompt_cache_retention,omitempty"`
 	// SafetyIdentifier carries client identity for policy abuse detection.
 	// This field is filtered by default and can be enabled via channel setting allow_safety_identifier.
@@ -854,6 +876,9 @@ type OpenAIResponsesRequest struct {
 	User             json.RawMessage `json:"user,omitempty"`
 	MaxToolCalls     *uint           `json:"max_tool_calls,omitempty"`
 	Prompt           json.RawMessage `json:"prompt,omitempty"`
+	// Codex Responses metadata/client_metadata:
+	// https://github.com/openai/codex/commit/14df0e8833aad0d6d78287954b61ffac67af936c
+	ClientMetadata json.RawMessage `json:"client_metadata,omitempty"`
 	// qwen
 	EnableThinking json.RawMessage `json:"enable_thinking,omitempty"`
 	// perplexity
@@ -938,8 +963,10 @@ func (r *OpenAIResponsesRequest) GetToolsMap() []map[string]any {
 }
 
 type Reasoning struct {
-	Effort  string `json:"effort,omitempty"`
-	Summary string `json:"summary,omitempty"`
+	Effort  string          `json:"effort,omitempty"`
+	Summary string          `json:"summary,omitempty"`
+	Mode    json.RawMessage `json:"mode,omitempty"`
+	Context json.RawMessage `json:"context,omitempty"`
 }
 
 type Input struct {

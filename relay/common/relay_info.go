@@ -18,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/tidwall/gjson"
 )
 
 type ThinkingContentInfo struct {
@@ -152,7 +153,19 @@ type RelayInfo struct {
 	RuntimeHeadersOverride                map[string]interface{}
 	UseRuntimeHeadersOverride             bool
 
+	// UpstreamRequestBodySize is the byte size of the marshaled upstream request
+	// body. It is set when the body is wrapped in a BodyStorage (see
+	// relay/common/outbound_body.go), so that DoApiRequest can populate
+	// http.Request.ContentLength manually (net/http only auto-detects it for
+	// *bytes.Reader/Buffer/strings.Reader). 0 means "let net/http decide".
+	UpstreamRequestBodySize int64
+
 	PriceData types.PriceData
+
+	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
+	// int32 bound (or NaN fallback) while computing this request's charge.
+	// It is surfaced onto the consume/task log's admin_info for auditing.
+	QuotaClamp *common.QuotaClamp
 
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
 	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
@@ -312,24 +325,26 @@ func (info *RelayInfo) ToString() string {
 
 // 定义支持流式选项的通道类型
 var streamSupportedChannels = map[int]bool{
-	constant.ChannelTypeOpenAI:      true,
-	constant.ChannelTypeAnthropic:   true,
-	constant.ChannelTypeAws:         true,
-	constant.ChannelTypeGemini:      true,
-	constant.ChannelCloudflare:      true,
-	constant.ChannelTypeAzure:       true,
-	constant.ChannelTypeVolcEngine:  true,
-	constant.ChannelTypeOllama:      true,
-	constant.ChannelTypeXai:         true,
-	constant.ChannelTypeDeepSeek:    true,
-	constant.ChannelTypeBaiduV2:     true,
-	constant.ChannelTypeZhipu_v4:    true,
-	constant.ChannelTypeAli:         true,
-	constant.ChannelTypeSubmodel:    true,
-	constant.ChannelTypeCodex:       true,
-	constant.ChannelTypeMoonshot:    true,
-	constant.ChannelTypeMiniMax:     true,
-	constant.ChannelTypeSiliconFlow: true,
+	constant.ChannelTypeOpenAI:         true,
+	constant.ChannelTypeAnthropic:      true,
+	constant.ChannelTypeAws:            true,
+	constant.ChannelTypeGemini:         true,
+	constant.ChannelCloudflare:         true,
+	constant.ChannelTypeAzure:          true,
+	constant.ChannelTypeVolcEngine:     true,
+	constant.ChannelTypeOllama:         true,
+	constant.ChannelTypeXai:            true,
+	constant.ChannelTypeDeepSeek:       true,
+	constant.ChannelTypeBaiduV2:        true,
+	constant.ChannelTypeZhipu_v4:       true,
+	constant.ChannelTypeAli:            true,
+	constant.ChannelTypeSubmodel:       true,
+	constant.ChannelTypeCodex:          true,
+	constant.ChannelTypeMoonshot:       true,
+	constant.ChannelTypeMiniMax:        true,
+	constant.ChannelTypeSiliconFlow:    true,
+	constant.ChannelTypeAdvancedCustom: true,
+	constant.ChannelTypeTencent:        true,
 }
 
 func GenRelayInfoWs(c *gin.Context, ws *websocket.Conn) *RelayInfo {
@@ -452,7 +467,7 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 
 	reqId := common.GetContextKeyString(c, common.RequestIdKey)
 	if reqId == "" {
-		reqId = common.GetTimeString() + common.GetRandomString(8)
+		reqId = common.NewRequestId()
 	}
 	info := &RelayInfo{
 		Request: request,
@@ -787,6 +802,9 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || channelPassThroughEnabled {
 		return jsonData, nil
 	}
+	if !hasRemovableDisabledField(jsonData, channelOtherSettings) {
+		return jsonData, nil
+	}
 
 	var data map[string]interface{}
 	if err := common.Unmarshal(jsonData, &data); err != nil {
@@ -851,6 +869,25 @@ func RemoveDisabledFields(jsonData []byte, channelOtherSettings dto.ChannelOther
 		return jsonData, nil
 	}
 	return jsonDataAfter, nil
+}
+
+func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.ChannelOtherSettings) bool {
+	values := gjson.GetManyBytes(
+		jsonData,
+		"service_tier",
+		"inference_geo",
+		"speed",
+		"store",
+		"safety_identifier",
+		"stream_options.include_obfuscation",
+	)
+
+	return (!channelOtherSettings.AllowServiceTier && values[0].Exists()) ||
+		(!channelOtherSettings.AllowInferenceGeo && values[1].Exists()) ||
+		(!channelOtherSettings.AllowSpeed && values[2].Exists()) ||
+		(channelOtherSettings.DisableStore && values[3].Exists()) ||
+		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
+		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
 }
 
 // RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data

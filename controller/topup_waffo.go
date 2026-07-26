@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/thanhpk/randstr"
 	waffo "github.com/waffo-com/waffo-go"
@@ -58,6 +58,17 @@ func getWaffoCurrency() string {
 		return setting.WaffoCurrency
 	}
 	return "USD"
+}
+
+func buildWaffoTopUpGoodsInfo(amount int64) *order.GoodsInfo {
+	appName := strings.TrimSpace(common.SystemName)
+	if appName == "" {
+		appName = "New API"
+	}
+	return &order.GoodsInfo{
+		GoodsName: fmt.Sprintf("Recharge %d credits", amount),
+		AppName:   appName,
+	}
 }
 
 // zeroDecimalCurrencies 零小数位币种，金额不能带小数点
@@ -237,18 +248,19 @@ func RequestWaffoPay(c *gin.Context) {
 	if setting.WaffoNotifyUrl != "" {
 		notifyUrl = setting.WaffoNotifyUrl
 	}
-	returnUrl := system_setting.ServerAddress + "/console/topup?show_history=true"
+	returnUrl := paymentReturnPath("/wallet?show_history=true")
 	if setting.WaffoReturnUrl != "" {
 		returnUrl = setting.WaffoReturnUrl
 	}
 
 	currency := getWaffoCurrency()
+	goodsInfo := buildWaffoTopUpGoodsInfo(req.Amount)
 	createParams := &order.CreateOrderParams{
 		PaymentRequestID: paymentRequestId,
 		MerchantOrderID:  merchantOrderId,
 		OrderAmount:      formatWaffoAmount(payMoney, currency),
 		OrderCurrency:    currency,
-		OrderDescription: fmt.Sprintf("Recharge %d credits", req.Amount),
+		OrderDescription: goodsInfo.GoodsName,
 		OrderRequestedAt: time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 		NotifyURL:        notifyUrl,
 		MerchantInfo: &order.MerchantInfo{
@@ -264,6 +276,7 @@ func RequestWaffoPay(c *gin.Context) {
 			PayMethodType: resolvedPayMethodType,
 			PayMethodName: resolvedPayMethodName,
 		},
+		GoodsInfo:          goodsInfo,
 		SuccessRedirectURL: returnUrl,
 		FailedRedirectURL:  returnUrl,
 	}

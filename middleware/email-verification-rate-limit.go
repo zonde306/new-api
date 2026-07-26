@@ -1,12 +1,11 @@
 package middleware
 
 import (
-	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/common/limiter"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,38 +17,25 @@ const (
 )
 
 func redisEmailVerificationRateLimiter(c *gin.Context) {
-	ctx := context.Background()
-	rdb := common.RDB
-	key := "emailVerification:" + EmailVerificationRateLimitMark + ":" + c.ClientIP()
-
-	count, err := rdb.Incr(ctx, key).Result()
+	ctx, cancel := newRateLimitRedisContext()
+	defer cancel()
+	shard := common.HashShard(c.ClientIP(), common.RateLimitKeyShardCount)
+	key := fmt.Sprintf("rateLimit:global:%s:ip:%s:%s", EmailVerificationRateLimitMark, c.ClientIP(), shard)
+	lim := limiter.New(ctx, common.RDB)
+	expireSeconds := int64(common.RateLimitKeyExpirationDuration.Seconds())
+	allowed, err := lim.SlidingWindow(ctx, key, EmailVerificationMaxRequests, EmailVerificationDuration, expireSeconds, limiter.SlidingWindowModeCheckAndRecord)
 	if err != nil {
-		// fallback
 		memoryEmailVerificationRateLimiter(c)
 		return
 	}
-
-	// 第一次设置键时设置过期时间
-	if count == 1 {
-		_ = rdb.Expire(ctx, key, time.Duration(EmailVerificationDuration)*time.Second).Err()
-	}
-
-	// 检查是否超出限制
-	if count <= int64(EmailVerificationMaxRequests) {
+	if allowed {
 		c.Next()
 		return
 	}
 
-	// 获取剩余等待时间
-	ttl, err := rdb.TTL(ctx, key).Result()
-	waitSeconds := int64(EmailVerificationDuration)
-	if err == nil && ttl > 0 {
-		waitSeconds = int64(ttl.Seconds())
-	}
-
 	c.JSON(http.StatusTooManyRequests, gin.H{
 		"success": false,
-		"message": fmt.Sprintf("发送过于频繁，请等待 %d 秒后再试", waitSeconds),
+		"message": fmt.Sprintf("发送过于频繁，请等待 %d 秒后再试", int64(EmailVerificationDuration)),
 	})
 	c.Abort()
 }
@@ -70,11 +56,13 @@ func memoryEmailVerificationRateLimiter(c *gin.Context) {
 }
 
 func EmailVerificationRateLimit() gin.HandlerFunc {
+	// Keep the fallback ready before requests arrive so a concurrent Redis
+	// outage cannot race the in-memory limiter's first initialization.
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
 	return func(c *gin.Context) {
 		if common.RedisEnabled {
 			redisEmailVerificationRateLimiter(c)
 		} else {
-			inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
 			memoryEmailVerificationRateLimiter(c)
 		}
 	}

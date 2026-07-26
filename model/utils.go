@@ -73,7 +73,7 @@ func getBatchUpdateWorkerCount(total int) int {
 	if total <= 1 {
 		return total
 	}
-	if common.UsingSQLite {
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
 		return 1
 	}
 	workerCount := common.BatchUpdateConcurrency

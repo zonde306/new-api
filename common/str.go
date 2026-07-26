@@ -2,6 +2,8 @@ package common
 
 import (
 	"encoding/base64"
+	"encoding/json"
+	"fmt"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -19,6 +21,16 @@ var (
 	maskApiKeyPattern = regexp.MustCompile(`(['"]?)api_key:([^\s'"]+)(['"]?)`)
 )
 
+const LocalLogContentLimit = 2048
+
+// LocalLogPreview limits log-only content unless debug logging is enabled.
+func LocalLogPreview(content string) string {
+	if DebugEnabled || len(content) <= LocalLogContentLimit {
+		return content
+	}
+	return fmt.Sprintf("%s... [truncated, original_length=%d, limit=%d]", content[:LocalLogContentLimit], len(content), LocalLogContentLimit)
+}
+
 func GetStringIfEmpty(str string, defaultValue string) string {
 	if str == "" {
 		return defaultValue
@@ -34,7 +46,7 @@ func GetRandomString(length int) string {
 }
 
 func MapToJsonStr(m map[string]interface{}) string {
-	bytes, err := Marshal(m)
+	bytes, err := json.Marshal(m)
 	if err != nil {
 		return ""
 	}
@@ -52,7 +64,7 @@ func StrToMap(str string) (map[string]interface{}, error) {
 
 func StrToJsonArray(str string) ([]interface{}, error) {
 	var js []interface{}
-	err := Unmarshal([]byte(str), &js)
+	err := json.Unmarshal([]byte(str), &js)
 	if err != nil {
 		return nil, err
 	}
@@ -61,12 +73,12 @@ func StrToJsonArray(str string) ([]interface{}, error) {
 
 func IsJsonArray(str string) bool {
 	var js []interface{}
-	return Unmarshal([]byte(str), &js) == nil
+	return json.Unmarshal([]byte(str), &js) == nil
 }
 
 func IsJsonObject(str string) bool {
 	var js map[string]interface{}
-	return Unmarshal([]byte(str), &js) == nil
+	return json.Unmarshal([]byte(str), &js) == nil
 }
 
 func String2Int(str string) int {
@@ -101,7 +113,7 @@ func GetJsonString(data any) string {
 	if data == nil {
 		return ""
 	}
-	b, _ := Marshal(data)
+	b, _ := json.Marshal(data)
 	return string(b)
 }
 
