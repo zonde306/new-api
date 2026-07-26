@@ -40,8 +40,14 @@ func New(ctx context.Context, r *redis.Client) *RedisLimiter {
 	once.Do(func() {
 		instance = &RedisLimiter{client: r}
 	})
-	if instance != nil && instance.client == nil {
+	if instance != nil && instance.client != r {
+		// Keep the singleton bound to the current Redis client (e.g. after a
+		// reconnect or when tests swap in a fresh client).
+		instance.mu.Lock()
 		instance.client = r
+		instance.limitScriptSHA = ""
+		instance.slidingWindowScriptSHA = ""
+		instance.mu.Unlock()
 	}
 	// 避免每次请求都 SCRIPT LOAD，仅在首次/丢失 SHA 时加载。
 	if instance.getRateScriptSHA() == "" || instance.getSlidingWindowScriptSHA() == "" {
