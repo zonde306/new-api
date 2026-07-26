@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { MaskedValueDisplay } from '@/components/masked-value-display'
@@ -32,7 +32,7 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
 import { isRedemptionExpired, isTimestampExpired } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
 export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
@@ -169,6 +169,24 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
         )
       },
       size: 120,
+    },
+    {
+      accessorKey: 'max_uses',
+      header: t('Uses'),
+      cell: ({ row }) => {
+        const redemption = row.original
+        const maxUses = redemption.max_uses > 0 ? redemption.max_uses : 1
+        const usedCount = redemption.used_count > 0 ? redemption.used_count : 0
+        return (
+          <StatusBadge
+            label={`${usedCount} / ${maxUses}`}
+            variant={usedCount >= maxUses ? 'neutral' : 'success'}
+            copyable={false}
+            className='-ml-1.5'
+          />
+        )
+      },
+      size: 100,
     },
     {
       accessorKey: 'created_time',

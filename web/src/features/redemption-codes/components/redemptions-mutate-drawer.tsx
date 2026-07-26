@@ -63,7 +63,7 @@ import {
   transformFormDataToPayload,
   transformRedemptionToFormDefaults,
 } from '../lib'
-import { type Redemption } from '../types'
+import type { Redemption } from '../types'
 import { useRedemptions } from './redemptions-provider'
 
 type RedemptionsMutateDrawerProps = {
@@ -91,11 +91,15 @@ export function RedemptionsMutateDrawer({
   useEffect(() => {
     if (open && isUpdate && currentRow) {
       // For update, fetch fresh data
-      getRedemption(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformRedemptionToFormDefaults(result.data))
-        }
-      })
+      getRedemption(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformRedemptionToFormDefaults(result.data))
+          }
+        })
+        .catch(() => {
+          // errors are surfaced by the shared API error handler
+        })
     } else if (open && !isUpdate) {
       // For create, reset to defaults
       form.reset(REDEMPTION_FORM_DEFAULT_VALUES)
@@ -236,6 +240,33 @@ export function RedemptionsMutateDrawer({
                         : t('Enter the quota amount in {{currency}}', {
                             currency: currencyLabel,
                           })}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='max_uses'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Max Uses')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type='number'
+                        min='1'
+                        placeholder={t('Enter max uses per code')}
+                        onChange={(e) =>
+                          field.onChange(parseInt(e.target.value, 10) || 1)
+                        }
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'How many times each code can be redeemed (once per user)'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

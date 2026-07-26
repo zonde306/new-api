@@ -25,7 +25,7 @@ import {
   REDEMPTION_VALIDATION,
   getRedemptionFormErrorMessages,
 } from '../constants'
-import { type RedemptionFormData, type Redemption } from '../types'
+import type { RedemptionFormData, Redemption } from '../types'
 
 // ============================================================================
 // Form Schema (use getRedemptionFormSchema(t) in components for i18n messages)
@@ -39,6 +39,9 @@ export function getRedemptionFormSchema(t: TFunction) {
       .min(REDEMPTION_VALIDATION.NAME_MIN_LENGTH, msg.NAME_LENGTH_INVALID)
       .max(REDEMPTION_VALIDATION.NAME_MAX_LENGTH, msg.NAME_LENGTH_INVALID),
     quota_dollars: z.number().min(0, t('Quota must be a positive number')),
+    max_uses: z
+      .number()
+      .min(REDEMPTION_VALIDATION.MAX_USES_MIN, msg.MAX_USES_INVALID),
     expired_time: z.date().optional(),
     count: z
       .number()
@@ -51,6 +54,7 @@ export function getRedemptionFormSchema(t: TFunction) {
 export type RedemptionFormValues = {
   name: string
   quota_dollars: number
+  max_uses: number
   expired_time?: Date
   count?: number
 }
@@ -62,6 +66,7 @@ export type RedemptionFormValues = {
 export const REDEMPTION_FORM_DEFAULT_VALUES: RedemptionFormValues = {
   name: '',
   quota_dollars: 10,
+  max_uses: 1,
   expired_time: undefined,
   count: 1,
 }
@@ -79,6 +84,7 @@ export function transformFormDataToPayload(
   return {
     name: data.name,
     quota: parseQuotaFromDollars(data.quota_dollars),
+    max_uses: data.max_uses,
     expired_time: data.expired_time
       ? Math.floor(data.expired_time.getTime() / 1000)
       : 0,
@@ -95,6 +101,7 @@ export function transformRedemptionToFormDefaults(
   return {
     name: redemption.name,
     quota_dollars: quotaUnitsToDollars(redemption.quota),
+    max_uses: redemption.max_uses > 0 ? redemption.max_uses : 1,
     expired_time:
       redemption.expired_time > 0
         ? new Date(redemption.expired_time * 1000)
