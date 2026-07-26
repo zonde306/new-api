@@ -1388,7 +1388,7 @@
     "Disabling...": "Désactivation en cours...",
     "Disclaimer: Personal use only. Do not distribute or share any credentials. This channel has prerequisites and requires prior setup; use it only if you understand the flow and risks, and comply with OpenAI's terms and policies. Credentials and configuration are for Codex CLI integration only, and are not intended for any other client, platform, or channel.": "Avertissement : usage personnel uniquement. Ne distribuez ni ne partagez aucun identifiant. Ce canal a des prerequis et necessite une configuration prealable ; utilisez-le uniquement si vous comprenez la procedure et les risques, et respectez les conditions et politiques d'OpenAI. Les identifiants et la configuration sont reserves a l'integration Codex CLI et ne sont pas destines a d'autres clients, plateformes ou canaux.",
     "Discord": "Discord",
-    "Discord guild access rule": "Règle d\u0027accès aux serveurs Discord",
+    "Discord guild access rule": "Règle d'accès aux serveurs Discord",
     "JSON mapping of guild IDs to role IDs. Prefix + means required, - means forbidden, no prefix means at least one must match. Empty value disables the restriction.": "Mappage JSON des ID de serveurs vers les ID de rôles. Le préfixe + signifie requis, - signifie interdit, sans préfixe au moins un doit correspondre. Une valeur vide désactive la restriction.",
     "Discount": "Remise",
     "Discount map by recharge amount (JSON object)": "Mappage des réductions par montant de recharge (objet JSON)",
@@ -5216,6 +5216,9 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Custom CSS": "CSS personnalisé",
+    "Enter custom CSS here to override existing styles": "Saisissez ici du CSS personnalisé pour remplacer les styles existants",
+    "Custom CSS injected into every page, leave empty to disable": "CSS personnalisé injecté dans chaque page, laissez vide pour désactiver"
   }
 }

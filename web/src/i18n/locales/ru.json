@@ -5216,6 +5216,9 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Custom CSS": "Пользовательский CSS",
+    "Enter custom CSS here to override existing styles": "Введите пользовательский CSS для переопределения существующих стилей",
+    "Custom CSS injected into every page, leave empty to disable": "Пользовательский CSS внедряется на каждую страницу; оставьте пустым, чтобы отключить"
   }
 }

@@ -31,6 +31,7 @@ const defaultSiteSettings: SiteSettings = {
   Footer: '',
   About: '',
   HomePageContent: '',
+  CustomCSS: '',
   ServerAddress: '',
   'legal.user_agreement': '',
   'legal.privacy_policy': '',

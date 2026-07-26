@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useEffect, useCallback } from 'react'
 
 import { DEFAULT_SYSTEM_NAME, DEFAULT_LOGO } from '@/lib/constants'
-import { applyFaviconToDom } from '@/lib/dom-utils'
+import { applyCustomCssToDom, applyFaviconToDom } from '@/lib/dom-utils'
 import {
   useSystemConfigStore,
   type CurrencyConfig,
@@ -39,6 +39,7 @@ interface StatusApiResponse {
     system_name?: string
     logo?: string
     footer_html?: string
+    custom_css?: string
     demo_site_enabled?: boolean
     display_token_stat_enabled?: boolean
     display_in_currency?: boolean
@@ -96,6 +97,7 @@ export function mapStatusDataToConfig(
     systemName: data.system_name || DEFAULT_SYSTEM_NAME,
     logo: data.logo || DEFAULT_LOGO,
     footerHtml: data.footer_html,
+    customCss: data.custom_css,
     demoSiteEnabled: data.demo_site_enabled,
     displayTokenStatEnabled: data.display_token_stat_enabled,
     currency,
@@ -169,6 +171,11 @@ export function useSystemConfig(options: UseSystemConfigOptions = {}) {
   useEffect(() => {
     if (autoLoad) loadConfig()
   }, [autoLoad, loadConfig])
+
+  // Apply admin-defined custom CSS overrides
+  useEffect(() => {
+    applyCustomCssToDom(config.customCss)
+  }, [config.customCss])
 
   // Preload logo image when URL changes
   useEffect(() => {

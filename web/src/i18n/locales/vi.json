@@ -5216,6 +5216,9 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Custom CSS": "CSS tùy chỉnh",
+    "Enter custom CSS here to override existing styles": "Nhập CSS tùy chỉnh tại đây để ghi đè các kiểu hiện có",
+    "Custom CSS injected into every page, leave empty to disable": "CSS tùy chỉnh được chèn vào mọi trang, để trống để tắt"
   }
 }

@@ -16,6 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+const CUSTOM_CSS_STYLE_ID = 'custom-css-overrides'
+
+export function applyCustomCssToDom(css: string | undefined) {
+  if (typeof document === 'undefined') return
+  const existing = document.querySelector<HTMLStyleElement>(
+    `#${CUSTOM_CSS_STYLE_ID}`
+  )
+  if (!css) {
+    existing?.remove()
+    return
+  }
+  if (existing) {
+    if (existing.textContent !== css) existing.textContent = css
+    return
+  }
+  const style = document.createElement('style')
+  style.id = CUSTOM_CSS_STYLE_ID
+  style.textContent = css
+  document.head.appendChild(style)
+}
+
 export function applyFaviconToDom(url: string) {
   if (typeof document === 'undefined' || !url) return
   try {

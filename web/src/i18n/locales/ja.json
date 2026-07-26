@@ -5216,6 +5216,9 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Custom CSS": "カスタム CSS",
+    "Enter custom CSS here to override existing styles": "既存のスタイルを上書きするカスタム CSS をここに入力してください",
+    "Custom CSS injected into every page, leave empty to disable": "カスタム CSS はすべてのページに挿入されます。空欄にすると無効になります"
   }
 }

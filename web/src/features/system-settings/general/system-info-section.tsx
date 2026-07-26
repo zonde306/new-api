@@ -52,6 +52,7 @@ const _systemInfoSchema = z.object({
   Footer: z.string().optional(),
   About: z.string().optional(),
   HomePageContent: z.string().optional(),
+  CustomCSS: z.string().optional(),
   legal: z.object({
     user_agreement: z.string().optional(),
     privacy_policy: z.string().optional(),
@@ -80,6 +81,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
     Footer: normalizeValue(defaultValues.Footer),
     About: normalizeValue(defaultValues.About),
     HomePageContent: normalizeValue(defaultValues.HomePageContent),
+    CustomCSS: normalizeValue(defaultValues.CustomCSS),
     legal: {
       user_agreement: normalizeValue(defaultValues.legal?.user_agreement),
       privacy_policy: normalizeValue(defaultValues.legal?.privacy_policy),
@@ -95,6 +97,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
     Footer: z.string().optional(),
     About: z.string().optional(),
     HomePageContent: z.string().optional(),
+    CustomCSS: z.string().optional(),
     legal: z.object({
       user_agreement: z.string().optional(),
       privacy_policy: z.string().optional(),
@@ -259,6 +262,34 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                       <FormDescription>
                         {t(
                           'Content displayed on the home page (supports Markdown)'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </SettingsFormGridItem>
+
+              <SettingsFormGridItem span='full'>
+                <FormField
+                  control={form.control}
+                  name='CustomCSS'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Custom CSS')}</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder={t(
+                            'Enter custom CSS here to override existing styles'
+                          )}
+                          rows={6}
+                          className='font-mono'
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Custom CSS injected into every page, leave empty to disable'
                         )}
                       </FormDescription>
                       <FormMessage />
