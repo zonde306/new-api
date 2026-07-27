@@ -2297,6 +2297,7 @@
     "Include Model": "Bao gồm mô hình",
     "Include Rule Name": "Bao gồm tên quy tắc",
     "Includes request rules": "Bao gồm quy tắc yêu cầu",
+    "Includes tool-call surcharge": "Bao gồm phụ phí gọi công cụ",
     "Including failed requests, 0 = unlimited": "Bao gồm các yêu cầu thất bại, 0 = không giới hạn",
     "Incoming path": "Path đầu vào",
     "Incoming path is required": "Bắt buộc path đầu vào",

@@ -2297,6 +2297,7 @@
     "Include Model": "Inclure le modèle",
     "Include Rule Name": "Inclure le nom de la règle",
     "Includes request rules": "Inclut des règles de requête",
+    "Includes tool-call surcharge": "Inclut un supplément pour appel d’outil",
     "Including failed requests, 0 = unlimited": "Y compris les requêtes échouées, 0 = illimité",
     "Incoming path": "Chemin entrant",
     "Incoming path is required": "Le chemin entrant est requis",
