@@ -24,9 +24,9 @@ type DiscordGuildRule struct {
 }
 
 type DiscordGuildClause struct {
-	GuildID         string
-	RequiredRoleIDs []string
-	OptionalRoleIDs []string
+	GuildID          string
+	RequiredRoleIDs  []string
+	OptionalRoleIDs  []string
 	ForbiddenRoleIDs []string
 }
 

@@ -43,6 +43,10 @@ const SITE_SECTIONS = [
           HomePageContent: settings.HomePageContent,
           CustomCSS: settings.CustomCSS,
           ServerAddress: settings.ServerAddress,
+          TaskPublicAddress: settings.TaskPublicAddress,
+          general_setting: {
+            docs_link: settings['general_setting.docs_link'],
+          },
           legal: {
             user_agreement: settings['legal.user_agreement'],
             privacy_policy: settings['legal.privacy_policy'],

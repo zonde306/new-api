@@ -218,11 +218,6 @@ func Redeem(key string, userId int) (quota int, err error) {
 			return errors.New(i18n.MsgRedemptionUsed)
 		}
 
-		err = tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
-		if err != nil {
-			return err
-		}
-
 		now := common.GetTimestamp()
 		usage := RedemptionUsage{
 			RedemptionId: redemption.Id,
@@ -241,8 +236,11 @@ func Redeem(key string, userId int) (quota int, err error) {
 		} else {
 			redemption.Status = common.RedemptionCodeStatusEnabled
 		}
-		err = tx.Model(redemption).Select("redeemed_time", "status", "used_user_id", "used_count").Updates(redemption).Error
-		return err
+		if err = tx.Model(redemption).Select("redeemed_time", "status", "used_user_id", "used_count").Updates(redemption).Error; err != nil {
+			return err
+		}
+
+		return creditTopUpQuota(tx, userId, redemption.Quota, nil)
 	})
 	if err != nil {
 		if err.Error() == i18n.MsgRedemptionInvalid || err.Error() == i18n.MsgRedemptionUsed || err.Error() == i18n.MsgRedemptionExpired || err.Error() == i18n.MsgRedemptionNotProvided {
@@ -251,11 +249,18 @@ func Redeem(key string, userId int) (quota int, err error) {
 		common.SysError("redemption failed: " + err.Error())
 		return 0, ErrRedeemFailed
 	}
+	syncCreditUserQuotaCache(userId, redemption.Quota, "redemption")
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
 	return redemption.Quota, nil
 }
 
 func (redemption *Redemption) Insert() error {
+	if redemption.Quota <= 0 {
+		return errors.New("redemption quota must be positive")
+	}
+	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+		return err
+	}
 	var err error
 	err = DB.Create(redemption).Error
 	return err
@@ -268,6 +273,12 @@ func (redemption *Redemption) SelectUpdate() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (redemption *Redemption) Update() error {
+	if redemption.Quota <= 0 {
+		return errors.New("redemption quota must be positive")
+	}
+	if err := common.ValidateWalletQuota(redemption.Quota); err != nil {
+		return err
+	}
 	var err error
 	err = DB.Model(redemption).Select("name", "status", "quota", "max_uses", "redeemed_time", "expired_time").Updates(redemption).Error
 	return err
@@ -295,8 +306,13 @@ func DeleteRedemptionById(id int) (err error) {
 }
 
 func BatchDeleteRedemptions(ids []int) (int64, error) {
-	if len(ids) == 0 {
-		return 0, nil
+	if len(ids) == 0 || len(ids) > 1000 {
+		return 0, errors.New("select between 1 and 1000 redemption codes")
+	}
+	for _, id := range ids {
+		if id <= 0 {
+			return 0, errors.New("redemption IDs must be positive")
+		}
 	}
 	var rowsAffected int64
 	err := DB.Transaction(func(tx *gorm.DB) error {

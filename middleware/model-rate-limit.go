@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
@@ -74,12 +76,6 @@ type redisSuccessRecord struct {
 	entrySuffix     string
 }
 
-type memorySuccessRecord struct {
-	successKey string
-	maxCount   int
-	duration   int64
-}
-
 func checkSingleRedisRateLimit(rdb *redis.Client, policy modelRateLimitPolicy) (bool, string, *redisSuccessRecord, error) {
 	duration := int64(policy.DurationMinutes * 60)
 	if duration <= 0 {
@@ -108,7 +104,7 @@ func checkSingleRedisRateLimit(rdb *redis.Client, policy modelRateLimitPolicy) (
 		allowed, err := tb.Allow(
 			ctx,
 			totalKey,
-			limiter.WithCapacity(int64(policy.TotalMaxCount)*duration),
+			limiter.WithCapacity(rateLimitCapacity(policy.TotalMaxCount, duration)),
 			limiter.WithRate(int64(policy.TotalMaxCount)),
 			limiter.WithRequested(duration),
 			limiter.WithExpireSeconds(duration+60),
@@ -169,7 +165,7 @@ func enforceRedisModelRateLimit(c *gin.Context, policies []modelRateLimitPolicy)
 
 	c.Next()
 
-	if c.Writer.Status() >= 400 {
+	if !modelRequestSucceeded(c) {
 		rollbackAll()
 	}
 }
@@ -183,36 +179,41 @@ func enforceMemoryModelRateLimit(c *gin.Context, policies []modelRateLimitPolicy
 	}
 	inMemoryRateLimiter.Init(time.Duration(maxDurationMinutes) * time.Minute)
 
-	successRecords := make([]memorySuccessRecord, 0)
+	reservations := make([]*common.RateLimitReservation, 0, len(policies))
 	for i := range policies {
 		policy := policies[i]
-		duration := int64(policy.DurationMinutes * 60)
+		duration := rateLimitDurationSeconds(policy.DurationMinutes)
 		if duration <= 0 {
 			continue
 		}
 		totalKey := ModelRequestRateLimitCountMark + policy.Identifier
 		successKey := ModelRequestRateLimitSuccessCountMark + policy.Identifier
-		if !inMemoryRateLimiter.AllowWithCheck(totalKey, policy.TotalMaxCount, successKey, policy.SuccessMaxCount, duration) {
+		if policy.TotalMaxCount > 0 && !inMemoryRateLimiter.Request(totalKey, policy.TotalMaxCount, duration) {
+			for _, held := range reservations {
+				held.Complete(false)
+			}
 			c.Status(http.StatusTooManyRequests)
 			c.Abort()
 			return
 		}
 		if policy.SuccessMaxCount > 0 {
-			successRecords = append(successRecords, memorySuccessRecord{
-				successKey: successKey,
-				maxCount:   policy.SuccessMaxCount,
-				duration:   duration,
-			})
+			reservation := inMemoryRateLimiter.Reserve(successKey, policy.SuccessMaxCount, duration)
+			if reservation == nil {
+				for _, held := range reservations {
+					held.Complete(false)
+				}
+				c.AbortWithStatus(http.StatusTooManyRequests)
+				return
+			}
+			reservations = append(reservations, reservation)
 		}
 	}
 
 	c.Next()
 
-	if c.Writer.Status() < 400 {
-		for i := range successRecords {
-			record := successRecords[i]
-			inMemoryRateLimiter.Request(record.successKey, record.maxCount, record.duration)
-		}
+	succeeded := modelRequestSucceeded(c)
+	for _, reservation := range reservations {
+		reservation.Complete(succeeded)
 	}
 }
 
@@ -224,6 +225,11 @@ func appendPolicyIfHasLimit(policies []modelRateLimitPolicy, policy modelRateLim
 		return policies
 	}
 	return append(policies, policy)
+}
+
+func modelRequestSucceeded(c *gin.Context) bool {
+	status, _ := common.GetContextKeyType[*relaycommon.StreamStatus](c, constant.ContextKeyResponseStreamStatus)
+	return c.Writer.Status() < 400 && !status.ResponseFailed()
 }
 
 // ModelRequestRateLimit 模型请求限流中间件
@@ -389,4 +395,26 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 			enforceMemoryModelRateLimit(c, policies)
 		}
 	}
+}
+
+func rateLimitDurationSeconds(durationMinutes int) int64 {
+	if durationMinutes <= 0 {
+		return 0
+	}
+	minutes := int64(durationMinutes)
+	if minutes > math.MaxInt64/60 {
+		return math.MaxInt64
+	}
+	return minutes * 60
+}
+
+func rateLimitCapacity(count int, durationSeconds int64) int64 {
+	if count <= 0 || durationSeconds <= 0 {
+		return 0
+	}
+	c := int64(count)
+	if c > math.MaxInt64/durationSeconds {
+		return math.MaxInt64
+	}
+	return c * durationSeconds
 }

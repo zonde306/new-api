@@ -67,60 +67,60 @@ func TestParseDiscordGuildRule_ParsePrefixSemantics(t *testing.T) {
 
 func TestDiscordGuildRule_EvaluateSamples(t *testing.T) {
 	tests := []struct {
-		name        string
-		raw         string
-		guilds      []string
+		name         string
+		raw          string
+		guilds       []string
 		rolesByGuild map[string][]string
-		wantMatch   bool
+		wantMatch    bool
 	}{
 		{
-			name:      "服务器1 AND 身份组1或身份组2",
-			raw:       `{"server_1":["role_1","role_2"]}`,
-			guilds:    []string{"server_1"},
+			name:         "服务器1 AND 身份组1或身份组2",
+			raw:          `{"server_1":["role_1","role_2"]}`,
+			guilds:       []string{"server_1"},
 			rolesByGuild: map[string][]string{"server_1": []string{"role_2"}},
-			wantMatch: true,
+			wantMatch:    true,
 		},
 		{
-			name:      "服务器1 AND 身份组1 AND 身份组2",
-			raw:       `{"server_1":["+role_1","+role_2"]}`,
-			guilds:    []string{"server_1"},
+			name:         "服务器1 AND 身份组1 AND 身份组2",
+			raw:          `{"server_1":["+role_1","+role_2"]}`,
+			guilds:       []string{"server_1"},
 			rolesByGuild: map[string][]string{"server_1": []string{"role_1", "role_2"}},
-			wantMatch: true,
+			wantMatch:    true,
 		},
 		{
-			name:      "服务器1 AND NOT 身份组1",
-			raw:       `{"server_1":["-role_1"]}`,
-			guilds:    []string{"server_1"},
+			name:         "服务器1 AND NOT 身份组1",
+			raw:          `{"server_1":["-role_1"]}`,
+			guilds:       []string{"server_1"},
 			rolesByGuild: map[string][]string{"server_1": []string{"role_2"}},
-			wantMatch: true,
+			wantMatch:    true,
 		},
 		{
-			name:      "服务器1 AND NOT 身份组1 AND 身份组2或身份组3 AND 身份组4",
-			raw:       `{"server_1":["-role_1","role_2","role_3","+role_4"]}`,
-			guilds:    []string{"server_1"},
+			name:         "服务器1 AND NOT 身份组1 AND 身份组2或身份组3 AND 身份组4",
+			raw:          `{"server_1":["-role_1","role_2","role_3","+role_4"]}`,
+			guilds:       []string{"server_1"},
 			rolesByGuild: map[string][]string{"server_1": []string{"role_3", "role_4"}},
-			wantMatch: true,
+			wantMatch:    true,
 		},
 		{
-			name:      "NOT 服务器2",
-			raw:       `{"-server_2":[]}`,
-			guilds:    []string{"server_1"},
+			name:         "NOT 服务器2",
+			raw:          `{"-server_2":[]}`,
+			guilds:       []string{"server_1"},
 			rolesByGuild: map[string][]string{},
-			wantMatch: true,
+			wantMatch:    true,
 		},
 		{
-			name:      "NOT 服务器2且身份组1 子句命中时拒绝",
-			raw:       `{"-server_2":["role_1"]}`,
-			guilds:    []string{"server_2"},
+			name:         "NOT 服务器2且身份组1 子句命中时拒绝",
+			raw:          `{"-server_2":["role_1"]}`,
+			guilds:       []string{"server_2"},
 			rolesByGuild: map[string][]string{"server_2": []string{"role_1"}},
-			wantMatch: false,
+			wantMatch:    false,
 		},
 		{
-			name:      "OR 服务器子句：满足其中一个",
-			raw:       `{"server_1":["role_1"],"server_2":["role_2"]}`,
-			guilds:    []string{"server_2"},
+			name:         "OR 服务器子句：满足其中一个",
+			raw:          `{"server_1":["role_1"],"server_2":["role_2"]}`,
+			guilds:       []string{"server_2"},
 			rolesByGuild: map[string][]string{"server_2": []string{"role_2"}},
-			wantMatch: true,
+			wantMatch:    true,
 		},
 	}
 
