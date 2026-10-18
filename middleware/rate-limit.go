@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 )
@@ -31,7 +32,7 @@ func redisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, mark st
 	expireSeconds := int64(common.RateLimitKeyExpirationDuration.Seconds())
 	allowed, err := lim.SlidingWindow(ctx, key, maxRequestNum, duration, expireSeconds, limiter.SlidingWindowModeCheckAndRecord)
 	if err != nil {
-		fmt.Println(err.Error())
+		logger.LogError(c.Request.Context(), common.LogText("rate limit check failed (mark=%s): %v", mark, err))
 		c.Status(http.StatusInternalServerError)
 		c.Abort()
 		return
@@ -166,7 +167,7 @@ func userRedisRateLimiter(c *gin.Context, maxRequestNum int, duration int64, key
 	expireSeconds := int64(common.RateLimitKeyExpirationDuration.Seconds())
 	allowed, err := lim.SlidingWindow(ctx, key, maxRequestNum, duration, expireSeconds, limiter.SlidingWindowModeCheckAndRecord)
 	if err != nil {
-		fmt.Println(err.Error())
+		logger.LogError(c.Request.Context(), common.LogText("rate limit check failed (key=%s): %v", key, err))
 		c.Status(http.StatusInternalServerError)
 		c.Abort()
 		return

@@ -1,6 +1,7 @@
 package common
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -41,7 +42,7 @@ func (info *RelayInfo) CountBillableToolCall(itemType string, functionName strin
 
 	switch itemType {
 	case dto.BuildInCallWebSearchCall:
-		info.incrementBillableToolCall(resolveWebSearchToolName(info.ResponsesUsageInfo.BuiltInTools))
+		info.incrementBillableToolCall(cmp.Or(info.WebSearchBillingKey, resolveWebSearchToolName(info.ResponsesUsageInfo.BuiltInTools)))
 	case dto.BuildInCallFileSearchCall:
 		info.incrementBillableToolCall(dto.BuildInToolFileSearch)
 	case dto.BuildInCallFunctionCall, dto.BuildInCallToolUse:
@@ -67,7 +68,7 @@ func (info *RelayInfo) SetBillableToolCount(name string, count int) {
 		return
 	}
 	if count < 0 {
-		common.SysError(fmt.Sprintf("billable tool count ignored: tool=%s count=%d", name, count))
+		common.SysError(common.LogText("billable tool count ignored: tool=%s count=%d", name, count))
 		return
 	}
 	info.ensureBuiltInTools()

@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/common/limiter"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting"
 
@@ -192,8 +193,7 @@ func enforceMemoryModelRateLimit(c *gin.Context, policies []modelRateLimitPolicy
 			for _, held := range reservations {
 				held.Complete(false)
 			}
-			c.Status(http.StatusTooManyRequests)
-			c.Abort()
+			abortWithOpenAiMessage(c, http.StatusTooManyRequests, i18n.T(c, i18n.MsgRateLimitTotalReached, map[string]any{"Minutes": policy.DurationMinutes, "Max": policy.TotalMaxCount}))
 			return
 		}
 		if policy.SuccessMaxCount > 0 {
@@ -202,7 +202,7 @@ func enforceMemoryModelRateLimit(c *gin.Context, policies []modelRateLimitPolicy
 				for _, held := range reservations {
 					held.Complete(false)
 				}
-				c.AbortWithStatus(http.StatusTooManyRequests)
+				abortWithOpenAiMessage(c, http.StatusTooManyRequests, i18n.T(c, i18n.MsgRateLimitReached, map[string]any{"Minutes": policy.DurationMinutes, "Max": policy.SuccessMaxCount}))
 				return
 			}
 			reservations = append(reservations, reservation)
