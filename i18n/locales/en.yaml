@@ -486,5 +486,12 @@ relay.retry_get_channel_failed: >-
   (retry): {{.Error}}
 relay.retry_no_available_channel: >-
   No available channel for model {{.Model}} under group {{.Group}} (retry)
+relay.shared_task_price_needs_override: >-
+  Model {{.Model}} shares its billing expression with task plugin {{.Plugin}};
+  configure a separate plugin billing expression before using ordinary relay
+  pricing
 relay.task_channel_disabled: "The channel of this task has been disabled"
+relay.task_usage_price_unsupported: >-
+  Model {{.Model}} uses a task usage expression; configure ordinary relay
+  pricing and separate plugin billing expressions
 user.default_token_name: "{{.Username}}'s initial token"

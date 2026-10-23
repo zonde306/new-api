@@ -376,7 +376,11 @@ relay.model_price_not_configured_admin: >-
 relay.retry_get_channel_failed: >-
   獲取分組 {{.Group}} 下模型 {{.Model}} 的可用管道失敗（retry）：{{.Error}}
 relay.retry_no_available_channel: "分組 {{.Group}} 下模型 {{.Model}} 的可用管道不存在（retry）"
+relay.shared_task_price_needs_override: >-
+  模型 {{.Model}} 與任務插件 {{.Plugin}} 共用了計費表達式；請先為插件設定獨立的計費表達式，再使用一般轉發定價
 relay.task_channel_disabled: "該任務所屬管道已被停用"
+relay.task_usage_price_unsupported: >-
+  模型 {{.Model}} 使用了任務用量表達式；請為一般轉發設定常規定價，並為插件單獨設定計費表達式
 user.default_token_name: "{{.Username}}的初始令牌"
 
 # Discord guild access (Traditional Chinese)

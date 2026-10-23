@@ -384,5 +384,9 @@ relay.model_price_not_configured_admin: >-
 relay.retry_get_channel_failed: >-
   获取分组 {{.Group}} 下模型 {{.Model}} 的可用渠道失败（retry）: {{.Error}}
 relay.retry_no_available_channel: "分组 {{.Group}} 下模型 {{.Model}} 的可用渠道不存在（retry）"
+relay.shared_task_price_needs_override: >-
+  模型 {{.Model}} 与任务插件 {{.Plugin}} 共用了计费表达式；请先为插件配置独立的计费表达式，再使用普通转发定价
 relay.task_channel_disabled: "该任务所属渠道已被禁用"
+relay.task_usage_price_unsupported: >-
+  模型 {{.Model}} 使用了任务用量表达式；请为普通转发配置常规定价，并为插件单独配置计费表达式
 user.default_token_name: "{{.Username}}的初始令牌"
