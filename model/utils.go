@@ -136,7 +136,8 @@ func applyBatchUpdate(type_ int, key int, value int) error {
 	case BatchUpdateTypeRequestCount:
 		return updateUserRequestCount(key, value)
 	case BatchUpdateTypeChannelUsedQuota:
-		return updateChannelUsedQuota(key, value)
+		updateChannelUsedQuota(key, value)
+		return nil
 	default:
 		return fmt.Errorf("unsupported batch update type: %d", type_)
 	}
