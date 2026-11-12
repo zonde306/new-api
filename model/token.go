@@ -31,17 +31,17 @@ type Token struct {
 	AutoGroups         string         `json:"-" gorm:"type:text"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 	// 允许用此令牌查询所属用户的额度；新建令牌默认开启，已有令牌升级后保持关闭
+	AllowUserQuotaQuery     bool `json:"allow_user_quota_query"`
+	RateLimitEnabled        bool `json:"rate_limit_enabled"`
+	RateLimitDurationMinute int  `json:"rate_limit_duration_minutes" gorm:"default:1"`
+	RateLimitCount          int  `json:"rate_limit_count" gorm:"default:0"`
+	RateLimitSuccessCount   int  `json:"rate_limit_success_count" gorm:"default:1000"`
+	IPRateLimitCount        int  `json:"ip_rate_limit_count" gorm:"default:0"`
+	IPRateLimitSuccessCount int  `json:"ip_rate_limit_success_count" gorm:"default:0"`
 	// CacheExpiresAt and CacheMAC must stay last: common.RedisHSetObj reflects
 	// over the struct fields in declaration order.
-	AllowUserQuotaQuery     bool   `json:"allow_user_quota_query"`
-	CacheExpiresAt          int64  `json:"-" gorm:"-"`
-	CacheMAC                string `json:"-" gorm:"-"`
-	RateLimitEnabled        bool   `json:"rate_limit_enabled"`
-	RateLimitDurationMinute int    `json:"rate_limit_duration_minutes" gorm:"default:1"`
-	RateLimitCount          int    `json:"rate_limit_count" gorm:"default:0"`
-	RateLimitSuccessCount   int    `json:"rate_limit_success_count" gorm:"default:1000"`
-	IPRateLimitCount        int    `json:"ip_rate_limit_count" gorm:"default:0"`
-	IPRateLimitSuccessCount int    `json:"ip_rate_limit_success_count" gorm:"default:0"`
+	CacheExpiresAt int64  `json:"-" gorm:"-"`
+	CacheMAC       string `json:"-" gorm:"-"`
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
