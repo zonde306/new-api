@@ -10,8 +10,10 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -24,6 +26,7 @@ type streamKeepAliveWriter struct {
 	cancel      context.CancelFunc
 	done        chan struct{}
 	pingContext *gin.Context
+	pingData    []byte
 }
 
 func (writer *streamKeepAliveWriter) stop() {
@@ -81,12 +84,41 @@ func (writer *streamKeepAliveWriter) Written() bool {
 func (writer *streamKeepAliveWriter) ping() error {
 	writer.mutex.Lock()
 	defer writer.mutex.Unlock()
-	return PingData(writer.pingContext)
+	return writeStreamPing(writer.pingContext, writer.pingData)
 }
 
-// StartStreamKeepAlive 按 interval 发送心跳，覆盖请求准备和重试；业务写入开始后交给流处理器。
-// 内层请求复用外层的保活，内层清理不会提前结束它。
+// StartStreamKeepAlive 按 interval 发送 SSE 注释行 `: PING` 心跳，适用 OpenAI 与 Claude 客户端。
 func StartStreamKeepAlive(c *gin.Context, interval time.Duration) func() {
+	return startStreamKeepAlive(c, interval, ": PING\n\n")
+}
+
+// StartRequestStreamKeepAlive 在请求准备与重试阶段按设置发送心跳，业务写入开始后由流处理器接管。
+// Gemini 原生格式（RelayFormatGemini）使用完整 empty chunk：注释行会被官方 SDK 判为解析失败。
+func StartRequestStreamKeepAlive(c *gin.Context, info *relaycommon.RelayInfo) func() {
+	generalSettings := operation_setting.GetGeneralSetting()
+	if !generalSettings.PingIntervalEnabled || (info != nil && info.DisablePing) {
+		return func() {}
+	}
+	interval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
+	if info != nil && info.RelayFormat == types.RelayFormatGemini {
+		return StartStreamKeepAliveGemini(c, interval)
+	}
+	return StartStreamKeepAlive(c, interval)
+}
+
+// StartStreamKeepAliveGemini 按 interval 发送完整的 empty chunk 心跳，用于 Gemini 原生格式 `alt=sse`。
+// Gemini SSE 帧必须带 `data: ` 前缀和可解析的 JSON，注释行会被官方 SDK 判为解析失败，
+// 因此心跳携带空 candidates，与上游流式首帧结构一致。
+func StartStreamKeepAliveGemini(c *gin.Context, interval time.Duration) func() {
+	return startStreamKeepAlive(c, interval, geminiPingData)
+}
+
+// geminiPingData 是原生 Gemini SSE 的合法空帧心跳（无 candidates、无 usageMetadata，不计费）。
+const geminiPingData = "data: {\"candidates\":[]}\n\n"
+
+// startStreamKeepAlive 按 interval 发送 pingData 作为心跳，覆盖请求准备和重试；
+// 业务写入开始后交给流处理器。内层请求复用外层的保活，内层清理不会提前结束它。
+func startStreamKeepAlive(c *gin.Context, interval time.Duration, pingData string) func() {
 	if previous, ok := c.Writer.(*streamKeepAliveWriter); ok {
 		select {
 		case <-previous.done:
@@ -106,7 +138,7 @@ func StartStreamKeepAlive(c *gin.Context, interval time.Duration) func() {
 	pingContext := c.Copy()
 	// 心跳使用原 writer，业务写入才会触发交接。
 	pingContext.Writer = c.Writer
-	writer := &streamKeepAliveWriter{ResponseWriter: c.Writer, cancel: cancel, done: make(chan struct{}), pingContext: pingContext}
+	writer := &streamKeepAliveWriter{ResponseWriter: c.Writer, cancel: cancel, done: make(chan struct{}), pingContext: pingContext, pingData: []byte(pingData)}
 	c.Writer = writer
 	go writer.keepAlive(ctx, interval)
 	return writer.stop
@@ -248,7 +280,14 @@ func StringData(c *gin.Context, str string) error {
 	return FlushWriter(c)
 }
 
+// PingData 写入 SSE 注释行 `: PING`，供 OpenAI 与 Claude 客户端保活。
 func PingData(c *gin.Context) error {
+	return writeStreamPing(c, []byte(": PING\n\n"))
+}
+
+// writeStreamPing 直接写入心跳帧，绕开 gin.Context.Render：Render 会把写错误
+// 记到 c.Errors 并 Abort 请求，而心跳失败只需终止保活协程。
+func writeStreamPing(c *gin.Context, pingData []byte) error {
 	if c == nil || c.Writer == nil {
 		return errors.New("context or writer is nil")
 	}
@@ -257,7 +296,7 @@ func PingData(c *gin.Context) error {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
-	if _, err := c.Writer.Write([]byte(": PING\n\n")); err != nil {
+	if _, err := c.Writer.Write(pingData); err != nil {
 		return fmt.Errorf("write ping data failed: %w", err)
 	}
 	return FlushWriter(c)

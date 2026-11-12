@@ -15,6 +15,7 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -473,6 +474,94 @@ func TestStreamScannerHandler_PingDisabledByRelayInfo(t *testing.T) {
 	body := recorder.Body.String()
 	pingCount := strings.Count(body, ": PING")
 	assert.Equal(t, 0, pingCount, "pings should be disabled when DisablePing=true")
+}
+
+// ---------- Gemini ping tests ----------
+
+// Gemini 原生格式的心跳必须是客户端能解析的空帧：注释行会让官方 SDK 直接失败。
+func TestStreamScannerHandler_GeminiPingIsParseableEmptyChunk(t *testing.T) {
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled, oldSeconds := setting.PingIntervalEnabled, setting.PingIntervalSeconds
+	setting.PingIntervalEnabled, setting.PingIntervalSeconds = true, 1
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled, setting.PingIntervalSeconds = oldEnabled, oldSeconds
+	})
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		for range 3 {
+			time.Sleep(400 * time.Millisecond)
+			_, _ = io.WriteString(pw, "data: {}"+"\n")
+		}
+	}()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:streamGenerateContent", nil)
+	resp := &http.Response{Body: pr}
+	info := &relaycommon.RelayInfo{RelayFormat: types.RelayFormatGemini, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandler(c, resp, info, func(data string, _ *StreamResult) {})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the stream to finish")
+	}
+
+	body := recorder.Body.String()
+	require.NotContains(t, body, ": PING", "Gemini clients cannot parse SSE comment heartbeats")
+	require.Contains(t, body, "data: {\"candidates\":[]}", "Gemini streams must be kept alive with a parseable empty chunk")
+}
+
+// 请求准备阶段的心跳也必须是 Gemini 合法帧，且尊重关闭开关。
+func TestStartRequestStreamKeepAliveUsesGeminiFrames(t *testing.T) {
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled, oldSeconds := setting.PingIntervalEnabled, setting.PingIntervalSeconds
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled, setting.PingIntervalSeconds = oldEnabled, oldSeconds
+	})
+
+	for _, test := range []struct {
+		name      string
+		format    types.RelayFormat
+		disabled  bool
+		enabled   bool
+		wantPing  string
+		wantNoise string
+	}{
+		{name: "gemini", format: types.RelayFormatGemini, enabled: true, wantPing: "data: {\"candidates\":[]}", wantNoise: ": PING"},
+		{name: "openai", format: types.RelayFormatOpenAI, enabled: true, wantPing: ": PING"},
+		{name: "gemini disabled by info", format: types.RelayFormatGemini, enabled: true, disabled: true},
+		{name: "disabled by setting", format: types.RelayFormatGemini, enabled: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			setting.PingIntervalEnabled = test.enabled
+			setting.PingIntervalSeconds = 1
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.5-flash:streamGenerateContent", nil)
+			info := &relaycommon.RelayInfo{RelayFormat: test.format, DisablePing: test.disabled, ChannelMeta: &relaycommon.ChannelMeta{}}
+
+			stop := StartRequestStreamKeepAlive(c, info)
+			time.Sleep(1200 * time.Millisecond)
+			stop()
+
+			body := recorder.Body.String()
+			if test.wantPing == "" {
+				assert.Equal(t, "", body)
+				return
+			}
+			assert.Contains(t, body, test.wantPing)
+			if test.wantNoise != "" {
+				assert.NotContains(t, body, test.wantNoise)
+			}
+		})
+	}
 }
 
 // ---------- StreamStatus integration ----------

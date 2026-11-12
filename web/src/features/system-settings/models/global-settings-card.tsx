@@ -327,7 +327,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                   <FormLabel>{t('Keep-alive Ping')}</FormLabel>
                   <FormDescription>
                     {t(
-                      'Periodically send ping frames to keep streaming connections active.'
+                      'Periodically send keep-alive frames to keep streaming connections active.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>

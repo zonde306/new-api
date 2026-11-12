@@ -4661,7 +4661,6 @@
     "Periodically check for upstream model changes": "Kiểm tra định kỳ các thay đổi mô hình nguồn",
     "Periodically checks all channels except manually disabled ones to detect failures and recover channels automatically.": "Định kỳ kiểm tra tất cả kênh trừ kênh bị vô hiệu hóa thủ công để phát hiện lỗi và tự động khôi phục.",
     "Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.": "Chỉ định kỳ kiểm tra kênh đã bật tự động vô hiệu hóa, không kiểm tra kênh bị vô hiệu hóa thủ công.",
-    "Periodically send ping frames to keep streaming connections active.": "Định kỳ gửi các khung ping để duy trì các kết nối truyền phát hoạt động.",
     "Permanently delete your account and all data": "Xóa vĩnh viễn tài khoản của bạn và tất cả dữ liệu",
     "Permissions": "Quyền",
     "Permit Passkey registration on non-HTTPS origins (only recommended for development)": "Cho phép đăng ký Passkey trên các nguồn gốc không phải HTTPS (chỉ khuyến nghị cho mục đích phát triển)",
@@ -7419,6 +7418,7 @@
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
     "By clicking sign in, you agree to our": "Bằng cách nhấp đăng nhập, bạn đồng ý với",
-    "By creating an account, you agree to our": "Bằng cách tạo tài khoản, bạn đồng ý với"
+    "By creating an account, you agree to our": "Bằng cách tạo tài khoản, bạn đồng ý với",
+    "Periodically send keep-alive frames to keep streaming connections active.": "Định kỳ gửi khung giữ kết nối để các kết nối truyền phát luôn hoạt động."
   }
 }

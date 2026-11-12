@@ -4661,7 +4661,6 @@
     "Periodically check for upstream model changes": "定期检查上游模型是否有变更",
     "Periodically checks all channels except manually disabled ones to detect failures and recover channels automatically.": "定时检查除手动禁用外的全部渠道，用于主动发现故障并自动恢复渠道。",
     "Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.": "只定时检查已开启“自动禁用”的渠道；未开启该选项和手动禁用的渠道不会被检查。",
-    "Periodically send ping frames to keep streaming connections active.": "定期发送 ping 帧以保持流连接处于活动状态。",
     "Permanently delete your account and all data": "永久删除您的帐户和所有数据",
     "Permissions": "权限",
     "Permit Passkey registration on non-HTTPS origins (only recommended for development)": "允许在非 HTTPS 源上注册通行密钥（仅建议用于开发）",
@@ -7419,6 +7418,7 @@
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放",
     "By clicking sign in, you agree to our": "点击登录即表示您同意我们的",
-    "By creating an account, you agree to our": "创建账户即表示您同意我们的"
+    "By creating an account, you agree to our": "创建账户即表示您同意我们的",
+    "Periodically send keep-alive frames to keep streaming connections active.": "定期发送保活帧以保持流连接处于活动状态。"
   }
 }

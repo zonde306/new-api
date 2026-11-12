@@ -4661,7 +4661,6 @@
     "Periodically check for upstream model changes": "Vérifier périodiquement les changements de modèles en amont",
     "Periodically checks all channels except manually disabled ones to detect failures and recover channels automatically.": "Vérifie périodiquement tous les canaux sauf ceux désactivés manuellement afin de détecter les pannes et de rétablir automatiquement les canaux.",
     "Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.": "Vérifie périodiquement uniquement les canaux dont la désactivation automatique est activée, en excluant les canaux désactivés manuellement.",
-    "Periodically send ping frames to keep streaming connections active.": "Envoyer périodiquement des trames ping pour maintenir les connexions de streaming actives.",
     "Permanently delete your account and all data": "Supprimer définitivement votre compte et toutes les données",
     "Permissions": "Autorisations",
     "Permit Passkey registration on non-HTTPS origins (only recommended for development)": "Autoriser l'enregistrement de Passkey sur des origines non-HTTPS (recommandé uniquement pour le développement)",
@@ -7419,6 +7418,7 @@
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
     "By clicking sign in, you agree to our": "En cliquant sur se connecter, vous acceptez nos",
-    "By creating an account, you agree to our": "En créant un compte, vous acceptez nos"
+    "By creating an account, you agree to our": "En créant un compte, vous acceptez nos",
+    "Periodically send keep-alive frames to keep streaming connections active.": "Envoyer périodiquement des trames de maintien pour garder les connexions de streaming actives."
   }
 }

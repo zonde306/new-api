@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
@@ -159,6 +160,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	if pingInterval <= 0 {
 		pingInterval = DefaultPingInterval
 	}
+	// 原生 Gemini 格式的客户端会把注释行当成解析失败，心跳必须是合法的空帧。
+	pingData := ": PING\n\n"
+	if info.RelayFormat == types.RelayFormatGemini {
+		pingData = geminiPingData
+	}
 
 	if pingEnabled {
 		pingTicker = time.NewTicker(pingInterval)
@@ -221,7 +227,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					func() {
 						writeMutex.Lock()
 						defer writeMutex.Unlock()
-						err = PingData(c)
+						err = writeStreamPing(c, []byte(pingData))
 					}()
 					if err != nil {
 						logger.LogError(c, common.LogText("ping data error: %s", err.Error()))

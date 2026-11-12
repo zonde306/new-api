@@ -4661,7 +4661,6 @@
     "Periodically check for upstream model changes": "アップストリームモデルの変更を定期的にチェック",
     "Periodically checks all channels except manually disabled ones to detect failures and recover channels automatically.": "手動で無効化されたものを除くすべてのチャネルを定期チェックし、障害の検出と自動復旧を行います。",
     "Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.": "自動無効化が有効なチャネルのみを定期チェックします。手動で無効化されたチャネルは対象外です。",
-    "Periodically send ping frames to keep streaming connections active.": "ストリーミング接続をアクティブに保つために、定期的にpingフレームを送信します。",
     "Permanently delete your account and all data": "アカウントとすべてのデータを永久に削除",
     "Permissions": "権限",
     "Permit Passkey registration on non-HTTPS origins (only recommended for development)": "非HTTPSオリジンでのパスキー登録を許可する（開発でのみ推奨）",
@@ -7419,6 +7418,7 @@
     "Zhipu V4": "Zhipu V 4",
     "Zoom": "ズーム",
     "By clicking sign in, you agree to our": "サインインをクリックすると、以下に同意したことになります：",
-    "By creating an account, you agree to our": "アカウントを作成すると、以下に同意したことになります："
+    "By creating an account, you agree to our": "アカウントを作成すると、以下に同意したことになります：",
+    "Periodically send keep-alive frames to keep streaming connections active.": "ストリーミング接続を維持するため、定期的にキープアライブフレームを送信します。"
   }
 }

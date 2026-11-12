@@ -4661,7 +4661,6 @@
     "Periodically check for upstream model changes": "Периодически проверять изменения моделей провайдера",
     "Periodically checks all channels except manually disabled ones to detect failures and recover channels automatically.": "Периодически проверяет все каналы, кроме отключённых вручную, чтобы выявлять сбои и автоматически восстанавливать каналы.",
     "Periodically checks only channels with auto-disable enabled, excluding manually disabled channels.": "Периодически проверяет только каналы с включённым автоотключением, исключая отключённые вручную.",
-    "Periodically send ping frames to keep streaming connections active.": "Периодически отправлять пинг-кадры для поддержания активности потоковых соединений.",
     "Permanently delete your account and all data": "Безвозвратно удалить ваш аккаунт и все данные",
     "Permissions": "Права",
     "Permit Passkey registration on non-HTTPS origins (only recommended for development)": "Разрешить регистрацию Passkey на не-HTTPS источниках (рекомендуется только для разработки)",
@@ -7419,6 +7418,7 @@
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom",
     "By clicking sign in, you agree to our": "Нажимая «Войти», вы соглашаетесь с нашими",
-    "By creating an account, you agree to our": "Создавая аккаунт, вы соглашаетесь с нашими"
+    "By creating an account, you agree to our": "Создавая аккаунт, вы соглашаетесь с нашими",
+    "Periodically send keep-alive frames to keep streaming connections active.": "Периодически отправлять кадры поддержания активности, чтобы потоковые соединения не обрывались."
   }
 }

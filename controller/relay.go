@@ -152,8 +152,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}()
 
 	generalSettings := operation_setting.GetGeneralSetting()
-	if relayFormat == types.RelayFormatClaude && relayInfo.IsStream && generalSettings.PingIntervalEnabled {
-		stopKeepAlive := helper.StartStreamKeepAlive(c, time.Duration(generalSettings.PingIntervalSeconds)*time.Second)
+	// Claude 与原生 Gemini 都在请求准备阶段保活：Gemini 的帧格式由 helper 按 RelayFormat 选择。
+	if (relayFormat == types.RelayFormatClaude || relayFormat == types.RelayFormatGemini) &&
+		relayInfo.IsStream && generalSettings.PingIntervalEnabled {
+		stopKeepAlive := helper.StartRequestStreamKeepAlive(c, relayInfo)
 		defer stopKeepAlive()
 	}
 

@@ -155,10 +155,9 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 	action := "generateContent"
 	if info.IsStream {
 		action = "streamGenerateContent?alt=sse"
-		if info.RelayMode == constant.RelayModeGemini {
-			info.DisablePing = true
-		}
 	}
+	// 原生 Gemini 流同样提供心跳，因此不再置 info.DisablePing；
+	// 心跳帧格式由 helper 按 RelayFormat 选择（Gemini 用合法空 chunk，而非 SSE 注释行）。
 	return fmt.Sprintf("%s/%s/models/%s:%s", info.ChannelBaseUrl, version, info.UpstreamModelName, action), nil
 }
 
